@@ -586,15 +586,15 @@
 
   function loginScreen() {
     return authShell("Sign in", "Your project's progress, drawings, documents and payments.", `
-      <div class="field"><label>Email</label><input type="email" id="f-email" autocomplete="username"/></div>
+      <div class="field"><label>Email or username</label><input type="text" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
       <div class="field"><label>Password</label><input type="password" id="f-password" autocomplete="current-password"/></div>
       <button class="btn btn-primary" data-action="sign-in" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Signing in…" : "Sign in"}</button>
       <button class="btn btn-ghost" data-action="go-forgot" style="width:100%;margin-top:8px;">Forgot your password?</button>`);
   }
 
   function forgotScreen() {
-    return authShell("Reset your password", "We'll email you a link to choose a new one.", `
-      <div class="field"><label>Email</label><input type="email" id="f-email" autocomplete="username"/></div>
+    return authShell("Reset your password", "Enter the email address on your account and we'll send a link.", `
+      <div class="field"><label>Email</label><input type="email" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
       <button class="btn btn-primary" data-action="send-reset" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Sending…" : "Send the link"}</button>
       <button class="btn btn-ghost" data-action="go-login" style="width:100%;margin-top:8px;">Back to sign in</button>`);
   }
@@ -606,14 +606,42 @@
       <button class="btn btn-primary" data-action="set-password" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save the password"}</button>`);
   }
 
+  // A username is an alias for the account's email address. The two are
+  // joined only on Supabase's own servers (the `login` function), so this
+  // page cannot be used to turn a guessed username into someone's email.
+  async function signInByUsername(username, password) {
+    const res = await fetch(CFG.supabaseUrl + "/functions/v1/login", {
+      method: "POST",
+      headers: { apikey: CFG.supabaseKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: username, password: password }),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok || !out || !out.access_token) return { error: true };
+    // Hand the tokens to the client library so the rest of the app, and the
+    // silent refresh, work exactly as they do after an email sign-in.
+    const { error } = await SB.auth.setSession({
+      access_token: out.access_token,
+      refresh_token: out.refresh_token,
+    });
+    return { error: error || null };
+  }
+
   async function doSignIn() {
-    const email = (document.getElementById("f-email") || {}).value || "";
+    const who = ((document.getElementById("f-email") || {}).value || "").trim();
     const password = (document.getElementById("f-password") || {}).value || "";
-    if (!email || !password) { UI.authError = "Please enter your email and password."; return render(); }
+    if (!who || !password) {
+      UI.authError = "Please enter your email or username, and your password.";
+      return render();
+    }
     UI.busy = true; UI.authError = null; render();
-    const { error } = await SB.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = who.indexOf("@") !== -1
+      ? await SB.auth.signInWithPassword({ email: who.toLowerCase(), password })
+      : await signInByUsername(who.toLowerCase(), password);
     UI.busy = false;
-    if (error) { UI.authError = "That email and password don't match an account."; return render(); }
+    if (error) {
+      UI.authError = "That sign-in and password don't match an account.";
+      return render();
+    }
     await enterApp();
   }
 
@@ -1252,10 +1280,11 @@
         <p class="page-sub">Who can open <strong>${esc(project().name)}</strong>. Removing someone here removes their access immediately.</p></div>
         <button class="btn btn-primary" data-action="add-member">${icon("plus",14)} Give someone access</button></div>
       ${members.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Name</th><th>Email</th><th>Type</th><th>Since</th><th></th></tr></thead><tbody>
+        <thead><tr><th>Name</th><th>Email</th><th>Username</th><th>Type</th><th>Since</th><th></th></tr></thead><tbody>
         ${members.map((m) => `<tr>
           <td><strong>${esc(m.full_name || "—")}</strong></td>
           <td>${esc(m.email || "—")}</td>
+          <td>${esc(m.username || "—")}</td>
           <td>${esc(m.kind === "staff" ? (m.role || "staff").replace(/_/g, " ") : "client")}</td>
           <td>${fmtDate(m.granted_at)}</td>
           <td><div class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-action="revoke-member" data-id="${esc(m.user_id)}">Remove</button></div></td>
@@ -1263,6 +1292,7 @@
       <div class="card" style="margin-top:16px;">
         <div class="section-title" style="margin:0 0 6px;">Adding a client</div>
         <p class="helper-text" style="line-height:1.7;">The person needs an account first. Create it in Supabase → Authentication → Users → Add user (turn on “Auto Confirm User”), then come back here and give them access by email. They can set their own password using “Forgot your password?” on the sign-in page.</p>
+        <p class="helper-text" style="line-height:1.7;margin-top:8px;">A username is optional. Set one in Supabase → SQL Editor with <code>update profiles set username = 'novaspa' where id = (select id from auth.users where email = 'client@example.com');</code> — after that they can sign in with either. Lowercase letters, digits, dot, dash or underscore; 3 to 30 characters.</p>
       </div>`;
   }
 
