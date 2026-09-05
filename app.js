@@ -91,10 +91,12 @@
 
   function pillTone(v) {
     const s = String(v || "").toLowerCase();
+    if (/overdue|rejected|delayed|over budget|critical|open|superseded/.test(s)) return "danger";
+    if (/partially|revision|attention|on hold/.test(s)) return "warn";
+    if (s === "inactive") return "hold";
     if (/approved|completed|paid|resolved|closed|final|active|on track|signed|acknowledged/.test(s)) return "ok";
     if (/pending|submitted|upcoming|in progress|draft|requested|issued|not started/.test(s)) return "info";
-    if (/revision|attention|on hold|due|partially/.test(s)) return "warn";
-    if (/rejected|overdue|delayed|over budget|critical|open|superseded/.test(s)) return "danger";
+    if (/due/.test(s)) return "warn";
     return "hold";
   }
   function pill(v) {
@@ -120,6 +122,9 @@
     banner: null,
     busy: false,
     previewClient: false,   // staff looking at the portal as the client sees it
+    dataErrors: [],
+    dataLoading: false,
+    memberError: false,
     authError: null,
     authNote: null,
   };
@@ -537,19 +542,34 @@
                   "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
                   "project_team", "boq_items", "finance_summary"];
 
+  let projectLoadVersion = 0;
   async function loadProjectData() {
-    D = {};
+    const version = ++projectLoadVersion;
     const pid = UI.projectId;
+    D = {}; UI.dataErrors = []; UI.dataLoading = !!pid;
     if (!pid) return;
-    const results = await Promise.all(TABLES.map((t) =>
-      SB.from(t).select("*").eq("project_id", pid).then((r) => [t, r])
+    const results = await Promise.allSettled(TABLES.map((table) =>
+      Promise.resolve().then(() => SB.from(table).select("*").eq("project_id", pid))
     ));
-    results.forEach(([t, r]) => {
-      if (r.error) { console.warn("load " + t, r.error.message); D[t] = []; }
-      else D[t] = r.data || [];
+    // A slower request for a previous project must never replace the current one.
+    if (version !== projectLoadVersion || pid !== UI.projectId) return;
+    results.forEach((result, index) => {
+      const table = TABLES[index];
+      if (result.status === "rejected" || result.value.error) {
+        UI.dataErrors.push(SCHEMA[table] ? SCHEMA[table].label : ({files:"Files", payments:"Payments", progress_snapshots:"Progress", finance_summary:"Finance Summary"})[table] || "Project information");
+      } else D[table] = result.value.data || [];
     });
+    UI.dataLoading = false;
     sortAll();
     await refreshSignedUrls();
+  }
+
+  function projectLoadStateHtml() {
+    if (UI.dataLoading) return `<div class="empty-state" role="status">Loading project information…</div>`;
+    if (!(UI.dataErrors || []).length) return "";
+    return `<div class="card" role="alert"><h2>Some project information couldn't be loaded</h2>
+      <p>${esc(UI.dataErrors.join(", "))}. Please check your connection and try again.</p>
+      <button class="btn btn-primary" data-action="retry-project">Retry</button></div>`;
   }
 
   function sortAll() {
@@ -575,15 +595,19 @@
       const { data, error } = await SB.storage.from(BUCKET).createSignedUrls(paths, 3600);
       if (error) return;
       (data || []).forEach((row) => {
-        if (row.signedUrl) SIGNED.set(row.path, { url: row.signedUrl, at: Date.now() });
+        if (row.signedUrl) SIGNED.set(row.path, { url: row.signedUrl, expires: Date.now() + 3600 * 1000 });
       });
     } catch (e) { /* a viewer with no permitted files simply gets nothing */ }
   }
   function urlFor(fileId) {
     const f = fileById(fileId);
-    if (!f) return "";
-    const s = SIGNED.get(f.storage_path);
-    return s ? s.url : "";
+    if (!f || f.deleted_at) return "";
+    const cached = SIGNED.get(f.storage_path);
+    if (!cached || cached.expires <= Date.now() + 60000 || !cached.expires) {
+      SIGNED.delete(f.storage_path);
+      return "";
+    }
+    return cached.url;
   }
 
   /* ---------------------------------------------------------------- */
@@ -594,22 +618,24 @@
     const clientAnswer = table === "approvals" && id && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient;
     if (!canEdit(table, id ? "UPDATE" : "INSERT") && !clientAnswer) throw new Error("You do not have permission to save this record.");
     if (clientAnswer) row = { response: row.response, comment: row.comment };
-    /* An empty box means "leave this alone", not "write NULL". Sending an
-       explicit null defeats the column defaults - uploaded_at is NOT NULL
-       DEFAULT now(), so a blank date field was failing every insert - and
-       there is no case in this app where blanking a field is meant to
-       erase a value the database filled in. */
+    // Inserts keep database defaults; updates must transmit intentional clears.
+    const fields = (SCHEMA[table] || {}).fields || [];
     const payload = {};
     Object.keys(row).forEach((k) => {
-      if (k.startsWith("__")) return;
-      const v = row[k];
-      if (v === "" || v === undefined) return;
-      payload[k] = v;
+      if (k.startsWith("__") || row[k] === undefined) return;
+      const value = row[k];
+      if (!id && (value === "" || value === null)) return;
+      const field = fields.find((f) => f.key === k);
+      if (id && value === "" && k === "uploaded_at") {
+        throw new Error("Please enter the upload date.");
+      }
+      payload[k] = value === "" && field && ["date", "time", "number"].includes(field.type) ? null : value;
     });
     payload.project_id = UI.projectId;
     if (id) {
-      const { error } = await SB.from(table).update(payload).eq("id", id);
+      const { data, error } = await SB.from(table).update(payload).eq("id", id).select("id").single();
       if (error) throw error;
+      if (!data) throw new Error("The record was not saved. Please reload and check your access.");
     } else {
       const { error } = await SB.from(table).insert(payload);
       if (error) throw error;
@@ -641,7 +667,7 @@
     if (error) throw error;
     D.files = D.files || []; D.files.push(data);
     const { data: signed } = await SB.storage.from(BUCKET).createSignedUrl(path, 3600);
-    if (signed) SIGNED.set(path, { url: signed.signedUrl, at: Date.now() });
+    if (signed) SIGNED.set(path, { url: signed.signedUrl, expires: Date.now() + 3600 * 1000 });
     return data;
   }
 
@@ -843,7 +869,7 @@
     nav += `<div class="nav-group-label">Portal</div>` + navItem("info", "Contact & Legal", "documents", null);
 
     const p = project();
-    const canManage = hasRole(["managing_director", "project_manager", "system_admin"]);
+    const canManage = canEdit("projects");
     return `<aside class="sidebar ${UI.sidebarOpen ? "open" : ""}">
       <button class="icon-btn sidebar-close" data-action="close-sidebar" aria-label="Close menu">${icon("close", 18)}</button>
       <div class="brand">
@@ -948,19 +974,21 @@
 
   function pageHtml() {
     if (!project()) {
-      return hasRole(["managing_director","project_manager","system_admin"])
+      return canEdit("projects")
         ? `<div class="page-head"><div><div class="eyebrow">Stanza Team</div>
              <h1 class="page-title">No projects yet</h1>
              <p class="page-sub">Create the first one to get started.</p></div>
              <button class="btn btn-primary" data-action="new-project">${icon("plus",14)} New project</button></div>`
         : emptyState("You don't have a project yet. Your Stanza contact will add you to one.");
     }
+    const loadState = projectLoadStateHtml();
+    if (loadState && !["info", "settings", "access"].includes(UI.page)) return loadState;
     if (UI.page === "overview") return overviewHtml();
     if (UI.page === "info") return infoHtml();
     if (UI.page === "project") return projectPageHtml();
     if (UI.page === "finance") return financePageHtml();
-    if (UI.page === "access") return isStaff() ? accessHtml() : overviewHtml();
-    if (UI.page === "settings") return hasRole(["managing_director", "system_admin"]) ? settingsHtml() : overviewHtml();
+    if (UI.page === "access") return canEdit("project_members") ? accessHtml() : overviewHtml();
+    if (UI.page === "settings") return !UI.previewClient && hasRole(["managing_director", "system_admin"]) ? settingsHtml() : overviewHtml();
     const s = SCHEMA[UI.page];
     if (!s) return overviewHtml();
     return listPageHtml(UI.page);
@@ -1307,7 +1335,7 @@
     { key: "note", label: "Note", full: true, type: "textarea" },
   ];
 
-  function financeSummary() { return (D.finance_summary || [])[0] || {}; }
+  function financeSummary() { return visible(D.finance_summary)[0] || {}; }
 
   function financePageHtml() {
     const fs = financeSummary();
@@ -1361,6 +1389,7 @@
   }
 
   function accessHtml() {
+    if (UI.memberError) return `<div class="card" role="alert"><p>Project access information couldn't be loaded.</p><button class="btn btn-primary" data-action="retry-members">Retry</button></div>`;
     const members = D.__members || [];
     return `<div class="page-head"><div><div class="eyebrow">Admin</div>
         <h1 class="page-title">Project Access</h1>
@@ -1384,13 +1413,28 @@
   }
 
   async function loadMembers() {
-    if (!isStaff() || !UI.projectId) { D.__members = []; return; }
-    const { data: mem } = await SB.from("project_members").select("*").eq("project_id", UI.projectId).is("revoked_at", null);
-    const ids = (mem || []).map((m) => m.user_id);
-    if (!ids.length) { D.__members = []; return; }
-    const { data: profs } = await SB.from("profiles").select("*").in("id", ids);
-    D.__members = (mem || []).map((m) => Object.assign({}, m,
-      (profs || []).find((p) => p.id === m.user_id) || {}));
+    UI.memberError = false;
+    if (!canEdit("project_members") || !UI.projectId) { D.__members = []; return; }
+    try {
+      const { data: mem, error } = await SB.from("project_members").select("*").eq("project_id", UI.projectId).is("revoked_at", null);
+      if (error) throw error;
+      const ids = (mem || []).map((m) => m.user_id);
+      if (!ids.length) { D.__members = []; return; }
+      const { data: profs, error: profileError } = await SB.from("profiles").select("*").in("id", ids);
+      if (profileError) throw profileError;
+      D.__members = (mem || []).map((m) => Object.assign({}, m,
+        (profs || []).find((p) => p.id === m.user_id) || {}));
+    } catch (error) { UI.memberError = true; D.__members = []; }
+  }
+
+  async function grantMemberAccess(userId) {
+    if (!canEdit("project_members")) throw new Error("You do not have permission to manage access.");
+    const { data, error } = await SB.from("project_members").upsert({
+      project_id: UI.projectId, user_id: userId, granted_by: ME.id,
+      granted_at: new Date().toISOString(), revoked_at: null,
+    }, { onConflict: "project_id,user_id" }).select("user_id").single();
+    if (error) throw error;
+    if (!data) throw new Error("Access was not updated. Please reload and try again.");
   }
 
   /* ---- fields ------------------------------------------------------ */
@@ -1569,15 +1613,21 @@
 
   async function openPdf(fileId) {
     const f = fileById(fileId);
-    if (!f) return;
-    let url = urlFor(fileId);
-    if (!url) {
-      const { data } = await SB.storage.from(BUCKET).createSignedUrl(f.storage_path, 3600);
-      if (data) { SIGNED.set(f.storage_path, { url: data.signedUrl, at: Date.now() }); url = data.signedUrl; }
+    if (!f || f.deleted_at) return;
+    try {
+      let url = urlFor(fileId);
+      if (!url) {
+        const { data, error } = await SB.storage.from(BUCKET).createSignedUrl(f.storage_path, 3600);
+        if (error || !data || !data.signedUrl) throw error || new Error("No preview link was returned.");
+        url = data.signedUrl;
+        SIGNED.set(f.storage_path, { url, expires: Date.now() + 3600 * 1000 });
+      }
+      UI.pdfView = { fileId, url, name: f.original_name, size: fmtBytes(f.size_bytes) };
+      render();
+    } catch (error) {
+      UI.pdfView = null;
+      setBanner("error", "Couldn't open that file. Please try opening it again or use Download.");
     }
-    if (!url) { setBanner("error", "Couldn't open that file."); return; }
-    UI.pdfView = { fileId, url, name: f.original_name, size: fmtBytes(f.size_bytes) };
-    render();
   }
 
   /* ---------------------------------------------------------------- */
@@ -1609,12 +1659,17 @@
     if (pf && project()) Object.assign(project(), readFields(pf, PROJECT_FIELDS));
   }
 
+  const WRITE_ACTIONS = new Set(["new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member"]);
+
   document.addEventListener("click", async (e) => {
     const anchor = e.target.closest("a[href]");
     if (anchor && !anchor.dataset.action && anchor.getAttribute("href") !== "#") return;
     const t = e.target.closest("[data-action]");
     if (!t) return;
     const a = t.dataset.action;
+    if (UI.previewClient && WRITE_ACTIONS.has(a)) {
+      return setBanner("readonly", "Client View is read-only. Switch to Admin to make changes.");
+    }
     if ((a === "close-modal" || a === "close-pdf-bg") && e.target !== t) return;
     if (a !== "search") {
       const sf = document.getElementById("settings-form");
@@ -1627,6 +1682,10 @@
 
     try {
       switch (a) {
+        case "retry-project": {
+          const loading = loadProjectData(); render(); await loading; return render();
+        }
+        case "retry-members": await loadMembers(); return render();
         case "toggle-sidebar": UI.sidebarOpen = !UI.sidebarOpen; return render();
         case "close-sidebar": UI.sidebarOpen = false; return render();
         case "go-forgot": UI.screen = "forgot"; UI.authError = UI.authNote = null; return render();
@@ -1762,6 +1821,7 @@
 
         case "set-preview": {
           UI.previewClient = t.dataset.preview === "1";
+          UI.modal = null; UI.pdfView = null;
           UI.page = "overview"; UI.search = ""; UI.filter = "All"; UI.sidebarOpen = false;
           UI.banner = UI.previewClient
             ? { type: "readonly", text: "Client View — this is what the client sees. Internal records are hidden and nothing can be edited." }
@@ -1787,11 +1847,11 @@
           const email = (el && el.value || "").trim().toLowerCase();
           if (!email) return setBanner("error", "Please enter an email address.");
           UI.busy = true; render();
-          const { data: prof } = await SB.from("profiles").select("id, full_name").ilike("email", email).maybeSingle();
+          const { data: prof, error: profileError } = await SB.from("profiles").select("id, full_name").ilike("email", email).maybeSingle();
+          if (profileError) throw profileError;
           if (!prof) { UI.busy = false; return setBanner("error", "No account with that email yet. Create it in Supabase first, then try again."); }
-          const { error } = await SB.from("project_members").insert({ project_id: UI.projectId, user_id: prof.id, granted_by: ME.id });
+          await grantMemberAccess(prof.id);
           UI.busy = false; UI.modal = null;
-          if (error) return setBanner("error", error.message);
           await loadMembers();
           return setBanner("saved", "Access granted to " + (prof.full_name || email) + ".");
         }
@@ -1828,12 +1888,16 @@
     if (e.target.matches('[data-action="switch-project"]')) {
       UI.projectId = e.target.value; UI.page = "overview"; UI.search = ""; UI.filter = "All";
       UI.sidebarOpen = false;   // on a phone the menu covers the page it just opened
+      const loading = loadProjectData();
       render();
-      await loadProjectData();
+      await loading;
       return render();
     }
     const up = e.target.closest("[data-upload]");
     if (up && up.files && up.files[0]) {
+      if (UI.previewClient || !UI.modal || !canEdit(UI.modal.page, UI.modal.isNew ? "INSERT" : "UPDATE")) {
+        return setBanner("readonly", "You do not have permission to upload here.");
+      }
       const fileKey = up.dataset.upload;
       const file = up.files[0];
       syncForm();
