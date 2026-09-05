@@ -730,6 +730,7 @@
     const p = project();
     const canManage = hasRole(["managing_director", "project_manager", "system_admin"]);
     return `<aside class="sidebar ${UI.sidebarOpen ? "open" : ""}">
+      <button class="icon-btn sidebar-close" data-action="close-sidebar" aria-label="Close menu">${icon("close", 18)}</button>
       <div class="brand">
         <div class="brand-lockup">
           <div class="brand-mark-wrap">${brandMark("brand-mark-img")}</div>
@@ -1098,15 +1099,35 @@
   function tableHtml(key, rows) {
     const s = SCHEMA[key];
     const admin = canEdit();
+    // Long-text columns get a wider minimum so a phone scrolls the table
+    // sideways instead of stacking a sentence one word per line.
+    const cls = (c) => {
+      const f = s.fields.find((x) => x.key === c);
+      const parts = [];
+      if (/amount|qty|quantity|cost|progress|sequence/.test(c)) parts.push("num");
+      if ((f && f.type === "textarea") || c === s.title) parts.push("wide");
+      return parts.length ? ` class="${parts.join(" ")}"` : "";
+    };
+    // On a phone the first column is all you see before swiping, so lead with
+    // the one that names the record rather than with its serial number.
+    const cols = (window.innerWidth <= 860 && s.columns.indexOf(s.title) > 0)
+      ? [s.title].concat(s.columns.filter((c) => c !== s.title))
+      : s.columns;
     return `<div class="table-wrap"><table><thead><tr>
-      ${s.columns.map((c) => {
+      ${cols.map((c) => {
         const f = s.fields.find((x) => x.key === c);
-        return `<th${/amount|qty|quantity|cost|progress|sequence/.test(c) ? ' class="num"' : ""}>${esc(f ? f.label : c)}</th>`;
+        return `<th${cls(c)}>${esc(f ? f.label : c)}</th>`;
       }).join("")}<th></th></tr></thead><tbody>
       ${rows.map((r) => `<tr data-action="open-row" data-page="${esc(key)}" data-id="${esc(r.id)}" style="cursor:pointer">
-        ${s.columns.map((c) => `<td${/amount|qty|quantity|cost|progress|sequence/.test(c) ? ' class="num"' : ""}>${
-          c === s.title ? `<strong>${cellValue(key, c, r)}</strong>${attachmentChip(key, r)}${internalChip(r)}` : cellValue(key, c, r)
-        }</td>`).join("")}
+        ${cols.map((c) => {
+          const wide = / wide|"wide/.test(cls(c));
+          const body = c === s.title
+            ? `<strong>${cellValue(key, c, r)}</strong>${attachmentChip(key, r)}${internalChip(r)}`
+            : cellValue(key, c, r);
+          // A paragraph in a cell made rows twelve lines tall on a phone.
+          // Three lines here; the row opens for the whole of it.
+          return `<td${cls(c)}>${wide ? `<span class="clamp3">${body}</span>` : body}</td>`;
+        }).join("")}
         <td><div class="row-actions">
           ${admin ? `<button class="btn btn-sm btn-ghost" data-action="open-row" data-page="${esc(key)}" data-id="${esc(r.id)}" data-stop="1" aria-label="Edit">${icon("edit",14)}</button>` : ""}
         </div></td></tr>`).join("")}
@@ -1689,6 +1710,7 @@
   document.addEventListener("change", async (e) => {
     if (e.target.matches('[data-action="switch-project"]')) {
       UI.projectId = e.target.value; UI.page = "overview"; UI.search = ""; UI.filter = "All";
+      UI.sidebarOpen = false;   // on a phone the menu covers the page it just opened
       render();
       await loadProjectData();
       return render();
