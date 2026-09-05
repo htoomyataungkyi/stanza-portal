@@ -11,9 +11,8 @@
    ------------------------------------------------------------------ */
 
 window.STANZA_CONFIG = {
-  supabaseUrl: "https://cmzmgtpbunzrjbbktpih.supabase.co",
-  supabaseKey: "sb_publishable_lWZWflFnIyv00X01syN51Q_-YOdMawx",
-
+    supabaseUrl: "https://uwlwgozawtcrpekcycce.supabase.co",
+  supabaseKey: "sb_publishable_DMYdwpJzW4f-JwwM4rpmRg_T6-3F2rU",
   // Shown on the login screen and in the footer.
   companyName: "Stanza Interior Design & Decoration",
 };
