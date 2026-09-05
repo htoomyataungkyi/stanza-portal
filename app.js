@@ -574,7 +574,7 @@
 
   function authShell(title, sub, body) {
     return `<div class="login-screen"><div class="login-card">
-      <div class="brand-word" style="text-align:center;margin-bottom:2px;">Stanza</div>
+      <img src="/logo.png" alt="${esc(CFG.companyName)}" class="login-logo"/>
       <div class="brand-sub" style="text-align:center;margin-bottom:18px;">Client Portal</div>
       <h1 class="login-title">${esc(title)}</h1>
       <p class="login-sub">${esc(sub)}</p>
@@ -870,9 +870,8 @@
     <rect x="0" y="96" width="48" height="48" rx="7"/>
   </svg>`;
   function brandMark(cls) {
-    return SETTINGS.logo_url
-      ? `<img src="${esc(SETTINGS.logo_url)}" alt="Logo" class="${cls || "brand-mark-img"}"/>`
-      : BRAND_MARK_SVG;
+    const src = SETTINGS.logo_url || "/logo-mark.png";
+    return `<img src="${esc(src)}" alt="Logo" class="${cls || "brand-mark-img"}"/>`;
   }
 
   /* The window of five stages around whichever one is running now. */
