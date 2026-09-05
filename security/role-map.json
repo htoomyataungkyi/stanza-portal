@@ -1,0 +1,69 @@
+{
+  "approvals": [
+    "project_manager",
+    "designer"
+  ],
+  "boq_items": [
+    "qs"
+  ],
+  "design_revisions": [
+    "project_manager",
+    "designer"
+  ],
+  "documents": [
+    "project_manager",
+    "designer",
+    "sales"
+  ],
+  "finance_summary": [
+    "finance",
+    "qs"
+  ],
+  "handover_records": [
+    "project_manager"
+  ],
+  "invoices": [
+    "finance",
+    "qs"
+  ],
+  "materials": [
+    "project_manager",
+    "designer",
+    "qs"
+  ],
+  "meetings": [
+    "project_manager",
+    "sales"
+  ],
+  "milestones": [
+    "project_manager"
+  ],
+  "payment_schedule": [
+    "finance",
+    "qs"
+  ],
+  "payments": [
+    "finance",
+    "qs"
+  ],
+  "progress_snapshots": [
+    "project_manager"
+  ],
+  "project_team": [
+    "project_manager"
+  ],
+  "quotations": [
+    "qs",
+    "finance"
+  ],
+  "site_issues": [
+    "project_manager"
+  ],
+  "site_media": [
+    "project_manager"
+  ],
+  "variation_orders": [
+    "project_manager",
+    "qs"
+  ]
+}

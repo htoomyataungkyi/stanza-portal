@@ -130,7 +130,7 @@
   let D = {};                // the current project's records, by table name
   const SIGNED = new Map();  // storage_path -> { url, expires }
 
-  function isStaff() { return !!ME && ME.kind === "staff"; }
+  function isStaff() { return !!ME && ME.status === "active" && ME.kind === "staff"; }
   function hasRole(list) {
     if (!isStaff()) return false;
     if (list.indexOf(ME.role) !== -1) return true;
@@ -139,7 +139,84 @@
        the buttons must too. */
     return ME.role === "product_owner" && list.indexOf("managing_director") !== -1;
   }
-  function canEdit() { return isStaff() && !UI.previewClient; }
+  const WRITE_ROLES = {
+  "approvals": [
+    "project_manager",
+    "designer"
+  ],
+  "boq_items": [
+    "qs"
+  ],
+  "design_revisions": [
+    "project_manager",
+    "designer"
+  ],
+  "documents": [
+    "project_manager",
+    "designer",
+    "sales"
+  ],
+  "finance_summary": [
+    "finance",
+    "qs"
+  ],
+  "handover_records": [
+    "project_manager"
+  ],
+  "invoices": [
+    "finance",
+    "qs"
+  ],
+  "materials": [
+    "project_manager",
+    "designer",
+    "qs"
+  ],
+  "meetings": [
+    "project_manager",
+    "sales"
+  ],
+  "milestones": [
+    "project_manager"
+  ],
+  "payment_schedule": [
+    "finance",
+    "qs"
+  ],
+  "payments": [
+    "finance",
+    "qs"
+  ],
+  "progress_snapshots": [
+    "project_manager"
+  ],
+  "project_team": [
+    "project_manager"
+  ],
+  "quotations": [
+    "qs",
+    "finance"
+  ],
+  "site_issues": [
+    "project_manager"
+  ],
+  "site_media": [
+    "project_manager"
+  ],
+  "variation_orders": [
+    "project_manager",
+    "qs"
+  ]
+};
+  function canEdit(resource = UI.page, operation = "UPDATE") {
+    if (!isStaff() || UI.previewClient) return false;
+    resource = ({overview:"progress_snapshots", finance:"finance_summary", project:"projects", access:"project_members"})[resource] || resource;
+    if (resource === "projects") return hasRole(["managing_director", "project_manager", "system_admin"]);
+    if (resource === "project_members") return hasRole(["managing_director", "project_manager", "sales", "system_admin"]);
+    if (hasRole(["managing_director"])) return true;
+    if (resource === "site_media" && operation === "INSERT" && hasRole(["subcontractor"])) return true;
+    return hasRole(WRITE_ROLES[resource] || []);
+  }
 
   /* Staff always receive internal records from the database. When a staff
      member switches to Client View we hide them here, so "what will my
@@ -429,7 +506,13 @@
     const { data: { user } } = await SB.auth.getUser();
     if (!user) { ME = null; return false; }
     const { data, error } = await SB.from("profiles").select("*").eq("id", user.id).single();
-    if (error) { ME = null; return false; }
+    if (error || !data || data.status !== "active") {
+      await SB.auth.signOut({ scope: "local" });
+      ME = null; PROJECTS = []; D = {}; SIGNED.clear();
+      UI.modal = null; UI.pdfView = null; UI.previewClient = false;
+      UI.authError = "Your account is unavailable. Please contact your project team.";
+      return false;
+    }
     ME = data;
     if (!ME.email) ME.email = user.email;
     return true;
@@ -508,6 +591,9 @@
   /* ---------------------------------------------------------------- */
 
   async function saveRow(table, row, id) {
+    const clientAnswer = table === "approvals" && id && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient;
+    if (!canEdit(table, id ? "UPDATE" : "INSERT") && !clientAnswer) throw new Error("You do not have permission to save this record.");
+    if (clientAnswer) row = { response: row.response, comment: row.comment };
     /* An empty box means "leave this alone", not "write NULL". Sending an
        explicit null defeats the column defaults - uploaded_at is NOT NULL
        DEFAULT now(), so a blank date field was failing every insert - and
@@ -531,6 +617,7 @@
   }
 
   async function deleteRow(table, id) {
+    if (!canEdit(table, "DELETE")) throw new Error("You do not have permission to delete this record.");
     const { error } = await SB.from(table).delete().eq("id", id);
     if (error) throw error;
   }
@@ -738,7 +825,7 @@
     NAV_GROUPS.forEach((g) => {
       const keys = groups[g.key];
       if (g.key === "admin") {
-        if (!canEdit()) return;
+        if (!canEdit("project_members")) return;
         nav += `<div class="nav-group-label">${esc(g.label)}</div>`;
         nav += navItem("access", "Project Access", "users", (D.__members || []).length);
         if (hasRole(["managing_director", "system_admin"])) nav += navItem("settings", "Portal Settings", "lock", null);
@@ -773,7 +860,7 @@
       </div>` : ""}
 
       <div class="nav-group-label" style="padding-top:2px;">Your Project</div>
-      ${PROJECTS.length > 1 || canEdit() ? `
+      ${PROJECTS.length > 1 || isStaff() ? `
         <select class="project-switcher" data-action="switch-project">
           ${PROJECTS.map((pr) => `<option value="${esc(pr.id)}" ${pr.id === UI.projectId ? "selected" : ""}>${esc(pr.name)}${pr.code ? " (" + esc(pr.code) + ")" : ""}</option>`).join("")}
         </select>
@@ -1092,7 +1179,7 @@
         <div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
         <h1 class="page-title">${esc(s.label)}</h1>
         <p class="page-sub">${all.length} record${all.length === 1 ? "" : "s"}</p>
-      </div>${canEdit() ? `<button class="btn btn-primary" data-action="new-row" data-page="${esc(key)}">${icon("plus",14)} Add</button>` : ""}</div>
+      </div>${canEdit(key, "INSERT") ? `<button class="btn btn-primary" data-action="new-row" data-page="${esc(key)}">${icon("plus",14)} Add</button>` : ""}</div>
       <div class="toolbar"><input class="search-input" type="text" placeholder="Search ${esc(s.label.toLowerCase())}…" value="${esc(UI.search)}"/></div>
       ${chips}<div style="height:14px"></div>${body}`;
   }
@@ -1126,7 +1213,7 @@
 
   function tableHtml(key, rows) {
     const s = SCHEMA[key];
-    const admin = canEdit();
+    const admin = canEdit(key);
     // Long-text columns get a wider minimum so a phone scrolls the table
     // sideways instead of stacking a sentence one word per line.
     const cls = (c) => {
@@ -1224,7 +1311,7 @@
 
   function financePageHtml() {
     const fs = financeSummary();
-    const admin = hasRole(["managing_director", "finance", "qs", "system_admin"]);
+    const admin = canEdit("finance_summary");
     const money = [
       ["Contract value", fs.revised_contract_value || fs.original_contract_value],
       ["Invoiced", fs.total_invoiced], ["Paid", fs.total_paid],
@@ -1245,7 +1332,7 @@
 
   function projectPageHtml() {
     const p = project();
-    const admin = hasRole(["managing_director", "project_manager", "system_admin"]);
+    const admin = canEdit("projects");
     return `<div class="page-head"><div><div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
         <h1 class="page-title">Project Info</h1>
         <p class="page-sub">${esc(p.code || "")}</p></div>
@@ -1313,7 +1400,7 @@
       if (f.staffOnly && !isStaff()) return false;
       return true;
     });
-    return `<div class="form-grid">${visible.map((f) => fieldHtml(f, values[f.key], readOnly && !(f.clientEditable && !isStaff()))).join("")}</div>`;
+    return `<div class="form-grid">${visible.map((f) => fieldHtml(f, values[f.key], readOnly && !(f.clientEditable && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient))).join("")}</div>`;
   }
 
   function fieldHtml(f, value, readOnly) {
@@ -1426,17 +1513,17 @@
     }
 
     const s = SCHEMA[m.page];
-    const readOnly = !canEdit();
+    const readOnly = !canEdit(m.page, m.isNew ? "INSERT" : "UPDATE");
     const title = m.isNew ? "Add " + s.label.replace(/s$/, "") : (m.draft[s.title] || s.label);
     return wrapModal(String(title).slice(0, 70),
       `<div class="modal-body" id="row-form">${renderFields(s.fields, m.draft, readOnly)}</div>`,
-      `${canEdit() && !m.isNew ? `<button class="btn btn-ghost btn-danger" data-action="delete-row">${icon("trash",14)} Delete</button>` : "<span></span>"}
+      `${canEdit(m.page, "DELETE") && !m.isNew ? `<button class="btn btn-ghost btn-danger" data-action="delete-row">${icon("trash",14)} Delete</button>` : "<span></span>"}
        <div style="display:flex;gap:8px;">
          <button class="btn" data-action="close-modal">${readOnly && !hasClientEditable(s) ? "Close" : "Cancel"}</button>
          ${(!readOnly || hasClientEditable(s)) ? `<button class="btn btn-primary" data-action="save-row" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save"}</button>` : ""}
        </div>`);
   }
-  function hasClientEditable(s) { return s.fields.some((f) => f.clientEditable); }
+  function hasClientEditable(s) { return !!ME && ME.status === "active" && ME.kind === "client" && !UI.previewClient && s.fields.some((f) => f.clientEditable); }
 
   function wrapModal(title, body, foot) {
     return `<div class="modal-overlay" data-action="close-modal"><div class="modal">
@@ -1753,7 +1840,7 @@
       UI.busy = true; render();
       try {
         const s = SCHEMA[UI.modal.page];
-        const category = up.dataset.imgmode ? (UI.modal.page === "site_media" ? "site_photo" : "design")
+        const category = up.dataset.imgmode ? (UI.modal.page === "site_media" ? "site_photo" : UI.modal.page === "materials" ? "material_sample" : "design")
                                             : guessCategory(UI.modal.page);
         const vis = UI.modal.draft.visibility || "internal";
         const rec = await uploadFile(file, category, vis);
