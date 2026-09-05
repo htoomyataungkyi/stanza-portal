@@ -130,7 +130,14 @@
   const SIGNED = new Map();  // storage_path -> { url, expires }
 
   function isStaff() { return !!ME && ME.kind === "staff"; }
-  function hasRole(list) { return isStaff() && list.indexOf(ME.role) !== -1; }
+  function hasRole(list) {
+    if (!isStaff()) return false;
+    if (list.indexOf(ME.role) !== -1) return true;
+    /* Product Owner and Managing Director are the same level of access
+       under different names - the database treats them the same way, so
+       the buttons must too. */
+    return ME.role === "product_owner" && list.indexOf("managing_director") !== -1;
+  }
   function canEdit() { return isStaff(); }
   function project() { return PROJECTS.find((p) => p.id === UI.projectId) || PROJECTS[0] || null; }
 
@@ -728,6 +735,7 @@
       <div style="margin-top:auto;padding:14px;border-top:1px solid var(--border);">
         <div style="font-size:12.5px;font-weight:600;">${esc(ME ? ME.full_name || ME.email : "")}</div>
         <div class="helper-text" style="margin-bottom:8px;">${esc(roleLabel())}</div>
+        <button class="btn btn-sm btn-ghost" data-action="open-account" style="width:100%;margin-bottom:6px;">${icon("lock", 13)} Change password</button>
         <button class="btn btn-sm btn-ghost" data-action="sign-out" style="width:100%;">${icon("logout", 13)} Sign out</button>
       </div>
     </aside>`;
@@ -743,7 +751,8 @@
     if (!ME) return "";
     if (ME.kind === "client") return "Client";
     return ({
-      managing_director: "Managing Director", project_manager: "Project Manager",
+      product_owner: "Product Owner", managing_director: "Managing Director",
+      project_manager: "Project Manager",
       designer: "Designer", qs: "QS / Cost Control", finance: "Finance",
       sales: "Sales / Customer Service", system_admin: "System Admin",
       subcontractor: "Subcontractor",
@@ -1191,6 +1200,19 @@
           <button class="btn" data-action="close-modal">Cancel</button>
           <button class="btn btn-primary" data-action="save-progress" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save"}</button></div>`);
     }
+    if (m.kind === "account") {
+      return wrapModal("Change your password", `<div class="modal-body" id="row-form">
+        <div class="form-grid">
+          <div class="field span-2"><label>New password</label>
+            <input type="password" data-field="p1" autocomplete="new-password"/></div>
+          <div class="field span-2"><label>Type it again</label>
+            <input type="password" data-field="p2" autocomplete="new-password"/></div>
+          <div class="field span-2"><span class="helper-text">At least 8 characters. You stay signed in on this device; anywhere else will need the new password.</span></div>
+        </div></div>`,
+        `<span></span><div style="display:flex;gap:8px;">
+          <button class="btn" data-action="close-modal">Cancel</button>
+          <button class="btn btn-primary" data-action="save-password" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save password"}</button></div>`);
+    }
     if (m.kind === "newproject") {
       return wrapModal("New project", `<div class="modal-body" id="row-form">
         ${renderFields(NEW_PROJECT_FIELDS, m.draft, false)}</div>`,
@@ -1455,6 +1477,19 @@
           if (error) return setBanner("error", error.message);
           await loadProjectData();
           return setBanner("saved", "Finance summary saved.");
+        }
+
+        case "open-account": UI.modal = { kind: "account", draft: {} }; return render();
+        case "save-password": {
+          const p1 = (document.querySelector('#row-form input[data-field="p1"]') || {}).value || "";
+          const p2 = (document.querySelector('#row-form input[data-field="p2"]') || {}).value || "";
+          if (p1.length < 8) return setBanner("error", "Please use at least 8 characters.");
+          if (p1 !== p2) return setBanner("error", "The two passwords don't match.");
+          UI.busy = true; render();
+          const { error } = await SB.auth.updateUser({ password: p1 });
+          UI.busy = false; UI.modal = null;
+          if (error) return setBanner("error", error.message);
+          return setBanner("saved", "Password changed.");
         }
 
         case "add-member": UI.modal = { kind: "member", draft: {} }; return render();
