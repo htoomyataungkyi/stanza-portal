@@ -530,7 +530,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .gallery-tile { position: relative; border-radius: var(--radius-sm); overflow: hidden; aspect-ratio: 1; background: var(--surface-2); border: 1px solid var(--border); }
-.gallery-tile img { width: 100%; height: 100%; object-fit: cover; }
+/* display:block matters: an inline image sits on the text baseline and
+   leaves a one-pixel strip of tile background showing under it. */
+.gallery-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gallery-tile .cat-tag { position: absolute; top: 6px; left: 6px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; background: rgba(255,255,255,0.92); color: #232323; padding: 2px 6px; border-radius: 5px; }
 .gallery-tile .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 20px 8px 6px; font-size: 10.5px; color: #fff; background: linear-gradient(to top, rgba(0,0,0,.65), transparent); }
 .gallery-tile .cap-edit { position: absolute; top: 6px; right: 6px; }
