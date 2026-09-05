@@ -119,6 +119,7 @@
     pdfView: null,
     banner: null,
     busy: false,
+    previewClient: false,   // staff looking at the portal as the client sees it
     authError: null,
     authNote: null,
   };
@@ -138,7 +139,17 @@
        the buttons must too. */
     return ME.role === "product_owner" && list.indexOf("managing_director") !== -1;
   }
-  function canEdit() { return isStaff(); }
+  function canEdit() { return isStaff() && !UI.previewClient; }
+
+  /* Staff always receive internal records from the database. When a staff
+     member switches to Client View we hide them here, so "what will my
+     client see?" can be answered without signing in as them. This is a
+     preview, not a security boundary - the real filtering happens in the
+     database for actual clients. */
+  function visible(rows) {
+    rows = rows || [];
+    return UI.previewClient ? rows.filter((r) => r.visibility !== "internal") : rows;
+  }
   function project() { return PROJECTS.find((p) => p.id === UI.projectId) || PROJECTS[0] || null; }
 
   /* ---------------------------------------------------------------- */
@@ -699,7 +710,7 @@
     NAV_GROUPS.forEach((g) => {
       const keys = groups[g.key];
       if (g.key === "admin") {
-        if (!isStaff()) return;
+        if (!canEdit()) return;
         nav += `<div class="nav-group-label">${esc(g.label)}</div>`;
         nav += navItem("access", "Project Access", "users", (D.__members || []).length);
         if (hasRole(["managing_director", "system_admin"])) nav += navItem("settings", "Portal Settings", "lock", null);
@@ -717,22 +728,51 @@
     nav += `<div class="nav-group-label">Portal</div>` + navItem("info", "Contact & Legal", "documents", null);
 
     const p = project();
+    const canManage = hasRole(["managing_director", "project_manager", "system_admin"]);
     return `<aside class="sidebar ${UI.sidebarOpen ? "open" : ""}">
       <div class="brand">
-        <div class="brand-lockup"><div><div class="brand-word">Stanza</div>
-        <div class="brand-sub">Client Portal</div></div></div>
+        <div class="brand-lockup">
+          <div class="brand-mark-wrap">${brandMark("brand-mark-img")}</div>
+          <div class="brand-sub">Client Portal</div>
+        </div>
         <hr class="brand-rule"/>
       </div>
-      ${PROJECTS.length > 1 ? `<div style="padding:12px 14px 4px;">
-        <label class="helper-text" style="display:block;margin-bottom:4px;">Project</label>
-        <select data-action="switch-project" style="width:100%;">
-          ${PROJECTS.map((pr) => `<option value="${esc(pr.id)}" ${pr.id === UI.projectId ? "selected" : ""}>${esc(pr.name)}</option>`).join("")}
-        </select></div>` : p ? `<div style="padding:8px 16px 4px;">
-          <div class="helper-text">Project</div><div style="font-weight:600;font-size:13.5px;">${esc(p.name)}</div></div>` : ""}
-      ${hasRole(["managing_director","project_manager","system_admin"]) ? `<div style="padding:10px 14px 0;">
-        <button class="btn btn-sm" data-action="new-project" style="width:100%;">${icon("plus",13)} New project</button></div>` : ""}
-      <div class="nav-list" style="margin-top:10px;">${nav}</div>
-      <div style="margin-top:auto;padding:14px;border-top:1px solid var(--border);">
+
+      ${isStaff() ? `<div class="mode-switch">
+        <button class="${UI.previewClient ? "" : "active"}" data-action="set-preview" data-preview="0">Admin</button>
+        <button class="${UI.previewClient ? "active" : ""}" data-action="set-preview" data-preview="1">Client View</button>
+      </div>` : ""}
+
+      <div class="nav-group-label" style="padding-top:2px;">Your Project</div>
+      ${PROJECTS.length > 1 || canEdit() ? `
+        <select class="project-switcher" data-action="switch-project">
+          ${PROJECTS.map((pr) => `<option value="${esc(pr.id)}" ${pr.id === UI.projectId ? "selected" : ""}>${esc(pr.name)}${pr.code ? " (" + esc(pr.code) + ")" : ""}</option>`).join("")}
+        </select>
+        ${canManage ? `<button class="btn btn-sm btn-ghost" data-action="new-project" style="width:100%;margin-top:6px;">${icon("plus", 13)} New project</button>` : ""}
+      ` : p ? `
+        <div class="project-card">
+          <div class="project-card-avatar">${esc((p.name || "?").slice(0, 1))}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="project-card-name">${esc(p.name)}</div>
+            <div class="project-card-code">${esc(p.code || "")}</div>
+          </div>
+        </div>` : ""}
+
+      <nav class="nav-list">${nav}</nav>
+
+      <div class="assist-card">
+        <div class="assist-icon">?</div>
+        ${canEdit()
+          ? `<div class="assist-title">You are editing</div>
+             <div class="assist-body">Anything you save is visible to the client straight away, unless you mark it internal.</div>`
+          : `<div class="assist-title">Need assistance?</div>
+             <div class="assist-body">Your Stanza project team is here to help.</div>
+             <button class="assist-link" data-action="goto" data-page="project_team">Contact project team</button>`}
+      </div>
+
+      ${SETTINGS.tagline ? `<div class="sidebar-tagline">“${esc(SETTINGS.tagline)}”</div>` : ""}
+
+      <div style="padding:12px 14px 16px;border-top:1px solid var(--border);margin-top:8px;">
         <div style="font-size:12.5px;font-weight:600;">${esc(ME ? ME.full_name || ME.email : "")}</div>
         <div class="helper-text" style="margin-bottom:8px;">${esc(roleLabel())}</div>
         <button class="btn btn-sm btn-ghost" data-action="open-account" style="width:100%;margin-bottom:6px;">${icon("lock", 13)} Change password</button>
@@ -761,15 +801,25 @@
 
   function topbar() {
     const p = project();
-    const initials = (ME && (ME.full_name || ME.email) || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending").length;
+    const name = ME ? (ME.full_name || ME.email) : "";
+    const initials = (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
     return `<div class="app-topbar">
-      <div><div class="topbar-greet-label">${esc(p ? p.code || "" : "")}</div>
-      <div class="topbar-greet-name">${esc(p ? p.name : "No project yet")}</div></div>
-      <div class="topbar-right"><div class="topbar-user">
-        <div class="avatar-chip">${esc(initials)}</div>
-        <div><div class="topbar-user-name">${esc(ME ? ME.full_name || ME.email : "")}</div>
-        <div class="topbar-user-role">${esc(roleLabel())}</div></div>
-      </div></div></div>`;
+      <div>
+        <div class="topbar-greet-label">${greeting()}</div>
+        <div class="topbar-greet-name">Welcome back${name ? ", " + esc(name.split(" ")[0]) : ""}</div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-icon-btn" title="${pending} waiting on approval">${icon("warn", 16)}${pending ? `<span class="topbar-icon-badge">${pending}</span>` : ""}</div>
+        <div class="topbar-user">
+          <div class="avatar-chip">${esc(initials)}</div>
+          <div>
+            <div class="topbar-user-name">${esc(name)}</div>
+            <div class="topbar-user-role">${esc(UI.previewClient ? "Viewing as client" : roleLabel())}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
   }
 
   function footer() {
@@ -802,6 +852,51 @@
 
   /* ---- overview --------------------------------------------------- */
 
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    return Math.ceil((new Date(String(dateStr).slice(0, 10) + "T00:00:00") - new Date()) / 86400000);
+  }
+
+  function greeting() {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning,";
+    if (h < 18) return "Good afternoon,";
+    return "Good evening,";
+  }
+
+  const BRAND_MARK_SVG = `<svg class="brand-mark-svg" viewBox="0 0 98 144" fill="currentColor" aria-hidden="true">
+    <rect x="50" y="0" width="48" height="48" rx="7"/>
+    <polygon points="50,48 98,48 48,96 0,96"/>
+    <rect x="0" y="96" width="48" height="48" rx="7"/>
+  </svg>`;
+  function brandMark(cls) {
+    return SETTINGS.logo_url
+      ? `<img src="${esc(SETTINGS.logo_url)}" alt="Logo" class="${cls || "brand-mark-img"}"/>`
+      : BRAND_MARK_SVG;
+  }
+
+  /* The window of five stages around whichever one is running now. */
+  function stepperHtml(phases) {
+    if (!phases.length) return emptyState("No timeline yet.");
+    const firstIncomplete = phases.findIndex((p) => p.status !== "Completed");
+    const currentIdx = firstIncomplete === -1 ? phases.length - 1 : firstIncomplete;
+    const start = Math.max(0, currentIdx - 1);
+    return `<div class="stepper">${phases.slice(start, start + 5).map((p, i) => {
+      const g = start + i;
+      const state = p.status === "Completed" ? "done" : g === currentIdx ? "current" : "upcoming";
+      const meta = state === "done" ? `Completed${p.actual_end ? " · " + fmtDate(p.actual_end) : ""}`
+        : state === "current" ? `In progress · ${p.progress_pct || 0}%`
+        : `${p.status === "On Hold" ? "On hold" : "Starts"}${p.planned_start ? " · " + fmtDate(p.planned_start) : ""}`;
+      return `<div class="step">
+        ${i > 0 ? `<div class="${state === "upcoming" ? "step-line" : "step-line-fill"}"></div>` : ""}
+        <div class="step-circle ${state}">${state === "done" ? icon("check", 15) : String(g + 1)}</div>
+        <div class="step-name">${esc(p.name)}</div>
+        <div class="step-meta">${meta}</div>
+        ${state === "current" ? `<div class="step-progress-underline"></div>` : ""}
+      </div>`;
+    }).join("")}</div>`;
+  }
+
   function donut(pct, size, stroke) {
     size = size || 168; stroke = stroke || 14;
     pct = Math.max(0, Math.min(100, Number(pct) || 0));
@@ -816,69 +911,117 @@
   function overviewHtml() {
     const p = project();
     const snap = (D.progress_snapshots || [])[0] || {};
-    const pending = (D.approvals || []).filter((a) => (a.response || "Pending") === "Pending");
-    const photos = (D.site_media || []).slice(0, 4);
-    const docs = (D.documents || []).slice(0, 5);
-    const nextMs = (D.milestones || []).find((m) => m.status !== "Completed");
+    const admin = canEdit() && !UI.previewClient;
+    const addr = (p.address || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const location = addr.length >= 2 ? addr[addr.length - 2] : (p.address || "—");
+
+    const phases = D.milestones || [];
+    const done = phases.filter((m) => m.status === "Completed").length;
+    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending");
+    const nextDeadline = pending.slice().sort((a, b) =>
+      String(a.deadline || "").localeCompare(String(b.deadline || "")))[0];
+    const nextPay = visible(D.payment_schedule)
+      .filter((x) => x.status === "Due" || x.status === "Upcoming")
+      .sort((a, b) => String(a.due_date || "").localeCompare(String(b.due_date || "")))[0];
+    const daysLeft = daysUntil(p.target_completion_date);
+    const photos = visible(D.site_media).slice(0, 4);
+    const docs = visible(D.documents).slice(0, 5);
+    const pct = Math.round(snap.overall_pct || 0);
 
     return `
-      <div class="page-head"><div>
-        <div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
-        <h1 class="page-title">${esc(p.name)}</h1>
-        <p class="page-sub">${esc(p.type || "")}${p.address ? " · " + esc(p.address) : ""}</p>
-      </div>${isStaff() ? `<button class="btn btn-primary" data-action="record-progress">${icon("plus",14)} Record progress</button>` : ""}</div>
-
-      <div class="hero">
-        <div class="hero-left">
-          <div class="hero-donut">${donut(snap.overall_pct || 0)}
-            <div class="hero-donut-label"><div class="hero-pct">${Math.round(snap.overall_pct || 0)}%</div>
-            <div class="hero-pct-sub">complete</div></div></div>
-        </div>
-        <div class="hero-right">
-          <div class="hero-kpis">
-            <div class="kpi"><div class="kpi-label">Planned</div><div class="kpi-value">${Math.round(snap.planned_pct || 0)}%</div></div>
-            <div class="kpi"><div class="kpi-label">Schedule</div><div class="kpi-value" style="font-size:15px;">${esc(snap.schedule_status || "—")}</div></div>
-            <div class="kpi"><div class="kpi-label">Budget</div><div class="kpi-value" style="font-size:15px;">${esc(snap.budget_status || "—")}</div></div>
-            <div class="kpi"><div class="kpi-label">Target finish</div><div class="kpi-value" style="font-size:15px;">${fmtDate(p.target_completion_date)}</div></div>
+      <div class="hero-card">
+        <div class="hero-ring-deco"></div>
+        <div>
+          <div class="hero-live"><span class="hero-live-dot"></span>Live Project</div>
+          <div class="hero-title">${esc(p.name)}</div>
+          <div class="hero-sub">${esc(p.type || "")}${p.category ? " · " + esc(p.category) : ""}</div>
+          <div class="hero-stats">
+            <div><div class="hero-stat-label">Location</div><div class="hero-stat-value">${esc(location || "—")}</div></div>
+            <div><div class="hero-stat-label">Project ID</div><div class="hero-stat-value">${esc(p.code || "—")}</div></div>
+            <div><div class="hero-stat-label">Target handover</div><div class="hero-stat-value">${fmtDate(p.target_completion_date)}</div></div>
           </div>
-          ${nextMs ? `<div class="hero-next"><div class="kpi-label">Up next</div>
-            <div style="font-size:15px;font-weight:600;">${esc(nextMs.name)}</div>
-            <div class="helper-text">${fmtDate(nextMs.planned_end)}</div></div>` : ""}
-          ${snap.note ? `<p class="helper-text" style="margin-top:10px;">${esc(snap.note)}</p>` : ""}
+        </div>
+        <div class="hero-donut-wrap">
+          ${donut(pct)}
+          <div style="position:absolute;display:flex;flex-direction:column;align-items:center;">
+            <div class="hero-donut-num">${pct}%</div>
+            <div class="hero-donut-label">Overall<br/>progress</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid kpi-grid">
+        <div class="card kpi-card">
+          <div class="kpi-chip kpi-chip-peach">${icon("timeline", 17)}</div>
+          <div><div class="kpi-card-label">Schedule</div>
+            <div class="kpi-card-value">${esc(snap.schedule_status || "—")}</div>
+            <div class="kpi-card-note">${daysLeft !== null ? (daysLeft >= 0 ? daysLeft + " days remaining" : Math.abs(daysLeft) + " days overdue") : "—"}</div></div>
+        </div>
+        <div class="card kpi-card">
+          <div class="kpi-chip kpi-chip-mint">${icon("check", 17)}</div>
+          <div><div class="kpi-card-label">Phases completed</div>
+            <div class="kpi-card-value">${done} of ${phases.length}</div>
+            <div class="kpi-card-note">${esc(p.next_milestone || "")}</div></div>
+        </div>
+        <div class="card kpi-card">
+          <div class="kpi-chip kpi-chip-blush">${icon("warn", 17)}</div>
+          <div><div class="kpi-card-label">${admin ? "Client action" : "Your action"}</div>
+            <div class="kpi-card-value">${pending.length} approval${pending.length === 1 ? "" : "s"}</div>
+            <div class="kpi-card-note">${nextDeadline && nextDeadline.deadline ? "Next due " + fmtDate(nextDeadline.deadline) : "Nothing pending"}</div></div>
+        </div>
+        <div class="card kpi-card">
+          <div class="kpi-chip kpi-chip-neutral">${icon("finance", 17)}</div>
+          <div><div class="kpi-card-label">Payment</div>
+            <div class="kpi-card-value">${nextPay ? "Next: " + fmtDate(nextPay.due_date) : "Up to date"}</div>
+            <div class="kpi-card-note">${nextPay ? esc(nextPay.milestone) : "No payments due"}</div></div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <div><div class="eyebrow" style="margin-bottom:4px;">Project Journey</div>
+              <h2 style="font-size:19px;">Current timeline</h2></div>
+            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="milestones">View full timeline →</button>
+          </div>
+          ${stepperHtml(phases)}
+        </div>
+        <div class="card">
+          <div class="flex-between" style="margin-bottom:6px;">
+            <div class="eyebrow" style="margin-bottom:4px;">Action Required</div>
+            ${pending.length ? `<span class="pill pill-danger">${pending.length}</span>` : ""}
+          </div>
+          <h2 style="font-size:19px;margin-bottom:6px;">${admin ? "Waiting on client" : "Waiting for you"}</h2>
+          <div class="action-list">
+            ${pending.length ? pending.slice(0, 4).map((a) => `
+              <div class="action-item">
+                <div class="action-thumb">${esc((a.category || "?").slice(0, 2).toUpperCase())}</div>
+                <div class="action-body"><div class="action-title">${esc(a.title)}</div>
+                <div class="action-meta">${esc(a.category || "")}${a.deadline ? " · Due " + fmtDate(a.deadline) : ""}</div></div>
+                <button class="btn btn-primary btn-sm" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}">Review</button>
+              </div>`).join("") : emptyState("Nothing waiting on approval right now.")}
+          </div>
         </div>
       </div>
 
       <div class="two-col" style="margin-top:22px;">
         <div class="card">
           <div class="flex-between" style="margin-bottom:10px;">
-            <span class="section-title" style="margin:0;">Recent site photos</span>
-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="site_media">See all →</button>
+            <span class="section-title" style="margin:0;">Live Report</span>
+            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="site_media">All updates →</button>
           </div>
           ${photos.length ? `<div class="gallery-grid">${photos.map((m) => tile("site_media", m)).join("")}</div>` : emptyState("No photos yet.")}
         </div>
         <div class="card">
           <div class="flex-between" style="margin-bottom:6px;">
-            <span class="section-title" style="margin:0;">Waiting on ${isStaff() ? "the client" : "you"}</span>
-            ${pending.length ? `<span class="pill pill-danger">${pending.length}</span>` : ""}
-          </div>
-          <div class="action-list">
-            ${pending.length ? pending.slice(0, 4).map((a) => `
-              <div class="action-item">
-                <div class="action-thumb">${esc((a.category || "?").slice(0,2).toUpperCase())}</div>
-                <div class="action-body"><div class="action-title">${esc(a.title)}</div>
-                <div class="action-meta">${a.deadline ? "Due " + fmtDate(a.deadline) : "No deadline"}</div></div>
-                <button class="btn btn-primary btn-sm" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}">Review</button>
-              </div>`).join("") : emptyState("Nothing waiting.")}
-          </div>
-          <div class="flex-between" style="margin:20px 0 8px;">
-            <span class="section-title" style="margin:0;">Documents</span>
-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="documents">See all →</button>
+            <span class="section-title" style="margin:0;">Document Center</span>
+            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="documents">View all →</button>
           </div>
           ${docs.length ? `<div class="action-list">${docs.map((d) => `
             <div class="action-item" data-action="open-row" data-page="documents" data-id="${esc(d.id)}" style="cursor:pointer;">
               <div class="action-thumb">${icon("documents", 18)}</div>
               <div class="action-body"><div class="action-title">${esc(d.name)}</div>
-              <div class="action-meta">${esc(d.folder || "")} · ${fmtDate(d.uploaded_at)}</div></div>
+              <div class="action-meta">${esc(d.folder || "")}${d.uploaded_at ? " · " + fmtDate(d.uploaded_at) : ""}</div></div>
               ${pill(d.status)}
             </div>`).join("")}</div>` : emptyState("No documents yet.")}
         </div>
@@ -899,7 +1042,7 @@
 
   function listPageHtml(key) {
     const s = SCHEMA[key];
-    const all = D[s.table] || [];
+    const all = visible(D[s.table]);
     let rows = all;
     const fdef = s.fields.find((f) => f.type === "select" && !f.staffOnly);
     if (fdef && UI.filter !== "All") rows = rows.filter((r) => r[fdef.key] === UI.filter);
@@ -977,13 +1120,14 @@
     const url = previewId ? urlFor(previewId) : "";
     const f = row.file_id ? fileById(row.file_id) : null;
     const isPdf = f && (/pdf$/i.test(f.mime_type) || /\.pdf$/i.test(f.original_name));
+    const isImage = f && /^image\//i.test(f.mime_type || "");
     return `<div class="gallery-tile" data-action="open-row" data-page="${esc(key)}" data-id="${esc(row.id)}" style="cursor:pointer">
       ${url ? `<img src="${esc(url)}" alt="${esc(row[s.title] || "")}" loading="lazy"/>`
             : `<div class="image-preview empty" style="width:100%;height:100%;border-radius:0;border:none;">${icon("image",22)}</div>`}
       ${row.category ? `<span class="cat-tag">${esc(row.category)}</span>` : ""}
       ${isPdf ? `<span class="pdf-badge" data-action="view-file" data-file="${esc(row.file_id)}" data-stop="1">PDF</span>`
-        : f ? `<span class="pdf-badge" data-action="download-file" data-file="${esc(row.file_id)}" data-stop="1">FILE</span>`
-        : row.external_url ? `<a class="pdf-badge" href="${esc(row.external_url)}" target="_blank" rel="noopener" data-stop="1">LINK ↗</a>` : ""}
+        : (f && !isImage) ? `<span class="pdf-badge" data-action="download-file" data-file="${esc(row.file_id)}" data-stop="1">FILE</span>`
+        : (!f && row.external_url) ? `<a class="pdf-badge" href="${esc(row.external_url)}" target="_blank" rel="noopener" data-stop="1">LINK ↗</a>` : ""}
       ${isStaff() && row.visibility === "internal" ? `<span class="pdf-badge" style="background:rgba(80,76,70,.92);left:auto;right:8px;bottom:34px;">INTERNAL</span>` : ""}
       <span class="cap">${esc(String(row[s.title] || "").slice(0, 60))}</span>
     </div>`;
@@ -1479,6 +1623,14 @@
           return setBanner("saved", "Finance summary saved.");
         }
 
+        case "set-preview": {
+          UI.previewClient = t.dataset.preview === "1";
+          UI.page = "overview"; UI.search = ""; UI.filter = "All"; UI.sidebarOpen = false;
+          UI.banner = UI.previewClient
+            ? { type: "readonly", text: "Client View — this is what the client sees. Internal records are hidden and nothing can be edited." }
+            : null;
+          return render();
+        }
         case "open-account": UI.modal = { kind: "account", draft: {} }; return render();
         case "save-password": {
           const p1 = (document.querySelector('#row-form input[data-field="p1"]') || {}).value || "";
