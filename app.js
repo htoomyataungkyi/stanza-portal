@@ -229,6 +229,35 @@
         { key: "__sample", label: "Sample photo", type: "image", full: true, fileKey: "sample_file_id" },
       ].concat(VIS_ONLY),
     },
+    project_team: {
+      label: "Project Team", icon: "team", group: "work", table: "project_team",
+      style: "table", title: "name", order: "sequence",
+      columns: ["sequence", "name", "role", "phone", "email"],
+      fields: [
+        { key: "name", label: "Name", full: true },
+        { key: "role", label: "Role" },
+        { key: "sequence", label: "Order", type: "number" },
+        { key: "phone", label: "Phone" },
+        { key: "email", label: "Email", full: true },
+      ].concat(VIS_ONLY),
+    },
+    boq_items: {
+      label: "BOQ Line Items", icon: "boq", group: "work", table: "boq_items",
+      style: "table", title: "description", order: "item_no",
+      columns: ["item_no", "floor", "category", "description", "qty", "unit", "approval_status"],
+      fields: [
+        { key: "description", label: "Description", full: true, type: "textarea" },
+        { key: "item_no", label: "Item no.", type: "number" },
+        { key: "floor", label: "Floor / Area" },
+        { key: "category", label: "Work category" },
+        { key: "size", label: "Size" },
+        { key: "material", label: "Material / brand", full: true },
+        { key: "unit", label: "Unit" },
+        { key: "qty", label: "Quantity", type: "number" },
+        { key: "remark", label: "Remark", full: true },
+        { key: "approval_status", label: "Approval status", type: "select", options: SELECT.approvalState },
+      ].concat(VIS_ONLY),
+    },
     documents: {
       label: "Documents", icon: "documents", group: "clientflow", table: "documents",
       style: "table", title: "name", sub: "folder", order: "uploaded_at", desc: true,
@@ -370,7 +399,7 @@
     { key: "finance", label: "Payments" },
     { key: "admin", label: "Admin" },
   ];
-  const NAV_ORDER = ["milestones", "design_revisions", "site_media", "materials",
+  const NAV_ORDER = ["milestones", "project_team", "design_revisions", "site_media", "materials", "boq_items",
                      "documents", "approvals", "site_issues", "variation_orders",
                      "quotations", "meetings", "payment_schedule", "invoices"];
 
@@ -404,7 +433,8 @@
 
   const TABLES = ["milestones", "progress_snapshots", "design_revisions", "site_media",
                   "materials", "documents", "approvals", "site_issues", "variation_orders",
-                  "quotations", "meetings", "payment_schedule", "invoices", "payments", "files"];
+                  "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
+                  "project_team", "boq_items", "finance_summary"];
 
   async function loadProjectData() {
     D = {};
@@ -645,6 +675,7 @@
     if (UI.page === "overview") return "Overview";
     if (UI.page === "info") return "Contact & Legal";
     if (UI.page === "project") return "Project Info";
+    if (UI.page === "finance") return "Finance Summary";
     if (UI.page === "access") return "Project Access";
     return SCHEMA[UI.page] ? SCHEMA[UI.page].label : "Overview";
   }
@@ -670,6 +701,7 @@
       if (!keys || !keys.length) return;
       nav += `<div class="nav-group-label">${esc(g.label)}</div>`;
       if (g.key === "work") nav += navItem("project", "Project Info", "project", null);
+      if (g.key === "finance") nav += navItem("finance", "Finance Summary", "finance", null);
       keys.forEach((k) => {
         const s = SCHEMA[k];
         nav += navItem(k, s.label, s.icon, (D[s.table] || []).length);
@@ -751,6 +783,7 @@
     if (UI.page === "overview") return overviewHtml();
     if (UI.page === "info") return infoHtml();
     if (UI.page === "project") return projectPageHtml();
+    if (UI.page === "finance") return financePageHtml();
     if (UI.page === "access") return isStaff() ? accessHtml() : overviewHtml();
     if (UI.page === "settings") return hasRole(["managing_director", "system_admin"]) ? settingsHtml() : overviewHtml();
     const s = SCHEMA[UI.page];
@@ -939,7 +972,9 @@
       ${url ? `<img src="${esc(url)}" alt="${esc(row[s.title] || "")}" loading="lazy"/>`
             : `<div class="image-preview empty" style="width:100%;height:100%;border-radius:0;border:none;">${icon("image",22)}</div>`}
       ${row.category ? `<span class="cat-tag">${esc(row.category)}</span>` : ""}
-      ${isPdf ? `<span class="pdf-badge" data-action="view-file" data-file="${esc(row.file_id)}" data-stop="1">PDF</span>` : ""}
+      ${isPdf ? `<span class="pdf-badge" data-action="view-file" data-file="${esc(row.file_id)}" data-stop="1">PDF</span>`
+        : f ? `<span class="pdf-badge" data-action="download-file" data-file="${esc(row.file_id)}" data-stop="1">FILE</span>`
+        : row.external_url ? `<a class="pdf-badge" href="${esc(row.external_url)}" target="_blank" rel="noopener" data-stop="1">LINK ↗</a>` : ""}
       ${isStaff() && row.visibility === "internal" ? `<span class="pdf-badge" style="background:rgba(80,76,70,.92);left:auto;right:8px;bottom:34px;">INTERNAL</span>` : ""}
       <span class="cap">${esc(String(row[s.title] || "").slice(0, 60))}</span>
     </div>`;
@@ -971,6 +1006,40 @@
       ${block("Terms of Use", SETTINGS.terms_of_use)}
       ${block("Client Data Consent", SETTINGS.data_consent)}
       ${block("Data Retention & Access", SETTINGS.data_retention)}`;
+  }
+
+  const FINANCE_FIELDS = [
+    { key: "original_contract_value", label: "Original contract value (MMK)", type: "number" },
+    { key: "approved_additional_works", label: "Approved additional works (MMK)", type: "number" },
+    { key: "revised_contract_value", label: "Revised contract value (MMK)", type: "number" },
+    { key: "total_invoiced", label: "Total invoiced (MMK)", type: "number" },
+    { key: "total_paid", label: "Total paid (MMK)", type: "number" },
+    { key: "outstanding_balance", label: "Outstanding balance (MMK)", type: "number" },
+    { key: "payment_progress", label: "Payment progress (%)", type: "number" },
+    { key: "note", label: "Note", full: true, type: "textarea" },
+  ];
+
+  function financeSummary() { return (D.finance_summary || [])[0] || {}; }
+
+  function financePageHtml() {
+    const fs = financeSummary();
+    const admin = hasRole(["managing_director", "finance", "qs", "system_admin"]);
+    const money = [
+      ["Contract value", fs.revised_contract_value || fs.original_contract_value],
+      ["Invoiced", fs.total_invoiced], ["Paid", fs.total_paid],
+      ["Outstanding", fs.outstanding_balance],
+    ];
+    return `<div class="page-head"><div><div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
+        <h1 class="page-title">Finance Summary</h1>
+        <p class="page-sub">Contract value against what has been invoiced and paid.</p></div>
+        ${admin ? `<button class="btn btn-primary" data-action="save-finance" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : "Save"}</button>` : ""}</div>
+      ${admin ? `<div class="card" id="finance-form">${renderFields(FINANCE_FIELDS, fs, false)}</div>`
+        : `<div class="card"><div class="info-grid">
+             ${money.filter((m) => m[1] !== null && m[1] !== undefined).map((m) => `
+               <div><div class="info-label">${esc(m[0])}</div><div class="info-value">${fmtMMK(m[1])}</div></div>`).join("")}
+             ${fs.payment_progress !== null && fs.payment_progress !== undefined ? `
+               <div><div class="info-label">Payment progress</div><div class="info-value">${fmtNum(fs.payment_progress)}%</div></div>` : ""}
+           </div>${fs.note ? `<div class="legal-prose" style="margin-top:14px;">${esc(fs.note)}</div>` : ""}</div>`}`;
   }
 
   function projectPageHtml() {
@@ -1248,6 +1317,8 @@
       const sf = document.getElementById("settings-form");
       if (sf) Object.assign(SETTINGS, readFields(sf, SETTINGS_FIELDS));
       syncProjectForm();
+      const finf = document.getElementById("finance-form");
+      if (finf) Object.assign(financeSummary(), readFields(finf, FINANCE_FIELDS));
       syncForm();
     }
 
@@ -1370,6 +1441,20 @@
           await loadProjectData();
           UI.page = "project";
           return setBanner("saved", "Project created. You have been added to it automatically.");
+        }
+
+        case "save-finance": {
+          UI.busy = true; render();
+          const ff = document.getElementById("finance-form");
+          const vals = readFields(ff, FINANCE_FIELDS);
+          const row = Object.assign({ project_id: UI.projectId }, vals);
+          Object.keys(row).forEach((k) => { if (row[k] === "") row[k] = null; });
+          const { error } = await SB.from("finance_summary")
+            .upsert(row, { onConflict: "project_id" });
+          UI.busy = false;
+          if (error) return setBanner("error", error.message);
+          await loadProjectData();
+          return setBanner("saved", "Finance summary saved.");
         }
 
         case "add-member": UI.modal = { kind: "member", draft: {} }; return render();
