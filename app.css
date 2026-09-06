@@ -392,6 +392,37 @@ h1, h2, h3 { text-wrap: balance; font-family: var(--font-display); margin: 0; }
 .action-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .action-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+/* ---------- Messages ---------- */
+/* A message is read top to bottom, so its row aligns to the top rather
+   than centring a one-line icon against five lines of text. */
+.notice-item { align-items: flex-start; }
+.notice-item .action-thumb { width: 40px; height: 40px; color: var(--accent); background: var(--accent-soft); }
+.notice-item.unread .action-thumb { background: var(--accent); color: var(--accent-ink); }
+.notice-item.unread .action-title { color: var(--text); }
+.notice-body {
+  font-size: 13px; line-height: 1.65; color: var(--text-muted); margin-top: 4px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.notice-item .chip-peach {
+  background: var(--chip-peach-bg); color: var(--chip-peach-fg); border-color: transparent;
+  font-size: 10.5px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px;
+}
+.nav-count-alert {
+  background: var(--accent); color: var(--accent-ink); font-weight: 700;
+  border-radius: 999px; padding: 1px 7px; font-size: 10.5px;
+}
+.notice-people {
+  display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px;
+}
+.notice-person {
+  display: flex; align-items: flex-start; gap: 9px; padding: 7px 6px; border-radius: 8px;
+  cursor: pointer; font-size: 13px;
+}
+.notice-person:hover { background: var(--surface-2); }
+.notice-person input { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.notice-person .helper-text { display: block; margin-top: 1px; }
+
 /* ---------- Pills / status ---------- */
 .pill {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
