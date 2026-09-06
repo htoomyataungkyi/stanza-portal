@@ -260,6 +260,16 @@
     rows = rows || [];
     return UI.previewClient ? rows.filter((r) => r.visibility !== "internal") : rows;
   }
+
+  // Everything still sitting with the client. "Revision Requested" belongs
+  // here as much as "Pending": the client has sent it back and it is not
+  // settled. Counting only "Pending" hid those items from the badge and
+  // from the Overview entirely, however overdue they were. One rule, used
+  // everywhere that counts them, so the badge and the card cannot disagree.
+  function awaitingClient(rows) {
+    return visible(rows).filter((a) => /^(pending|revision)/i.test(a.response || "Pending"));
+  }
+  function isSentBack(a) { return /^revision/i.test(a.response || ""); }
   // Looking at every project at once rather than one of them. Reading
   // only: the figures come from several projects, so there is nothing
   // here that a Save button could sensibly write back to.
@@ -1199,7 +1209,7 @@
 
   function topbar() {
     const p = project();
-    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending").length;
+    const pending = awaitingClient(D.approvals).length;
     const name = ME ? (ME.full_name || ME.email) : "";
     const initials = (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
     return `<div class="app-topbar">
@@ -1337,7 +1347,7 @@
     const approved = visible(D.approvals).filter(a => a.response === 'Approved');
     const canRespond = ME && ME.kind === 'client' && ME.status === 'active' && !UI.previewClient;
     const done = phases.filter((m) => m.status === "Completed").length;
-    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending").slice().sort((a,b) => String(a.deadline || "9999").localeCompare(String(b.deadline || "9999")));
+    const pending = awaitingClient(D.approvals).slice().sort((a,b) => String(a.deadline || "9999").localeCompare(String(b.deadline || "9999")));
     const nextDeadline = pending.slice().sort((a, b) =>
       String(a.deadline || "").localeCompare(String(b.deadline || "")))[0];
     const nextPay = visible(D.payment_schedule)
@@ -1416,13 +1426,16 @@
         <section class="card approval-overview">
           <div class="flex-between"><div class="eyebrow">Action Required</div><button class="report-link" data-action="goto" data-page="approvals">View all →</button></div>
           <h2>Waiting on client</h2>
-          <div class="approval-counts"><span>${pending.length} pending review</span><span class="pill pill-ok">${approved.length} approved</span></div>
+          <div class="approval-counts"><span>${pending.length} awaiting decision</span><span class="pill pill-ok">${approved.length} approved</span></div>
           ${canRespond ? '<p class="helper-text">Review the details, choose your decision and submit it.</p>' : ''}
           <div class="action-list">
             ${pending.length ? pending.slice(0,4).map(a => {
               const left = daysUntil(a.deadline);
               const overdue = Number.isFinite(left) && left < 0;
-              return `<div class="approval-overview-item"><div class="action-body"><div class="action-title">${esc(a.title)}</div><div class="action-meta">${esc(a.category || 'Approval request')}</div>
+              return `<div class="approval-overview-item"><div class="action-body"><div class="action-title">${esc(a.title)}</div><div class="action-meta">${esc(a.category || 'Approval request')}${
+                  /* Marked only when it was sent back, so an item merely
+                     waiting to be looked at still reads exactly as before. */
+                  isSentBack(a) ? ` <span class="pill pill-warn sent-back"><span class="pill-dot"></span>Revision requested</span>` : ""}</div>
                 <div class="approval-deadline ${overdue ? 'is-overdue' : ''}">Deadline: ${a.deadline ? fmtDate(a.deadline) : 'Not set'}${Number.isFinite(left) ? ' · ' + (overdue ? Math.abs(left) + ' days overdue' : left === 0 ? 'Due today' : left + ' days left') : ''}</div></div>
                 <button class="btn btn-primary btn-sm" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}">${canRespond ? 'Review & approve' : 'Review'}</button></div>`;
             }).join('') : emptyState('No requests waiting on the client.')}
@@ -1636,7 +1649,12 @@
     return `<div class="page-head"><div><div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
         <h1 class="page-title">Finance Summary</h1>
         <p class="page-sub">Contract value against what has been invoiced and paid.</p></div>
-        ${admin ? `<button class="btn btn-primary" data-action="save-finance" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : m.page === "approvals" && hasClientEditable(s) ? "Submit decision" : "Save"}</button>` : ""}</div>
+        ${/* Neither `m` nor `s` exists in this function - the label test that
+              was here threw "m is not defined" and stopped the whole Finance
+              Summary page from rendering for anyone able to edit it. This is
+              the finance form's own save button; the approvals wording
+              belongs on the approvals modal, not here. */""}
+        ${admin ? `<button class="btn btn-primary" data-action="save-finance" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : "Save"}</button>` : ""}</div>
       ${admin ? `<div class="card" id="finance-form">${renderFields(FINANCE_FIELDS, fs, false)}</div>`
         : `<div class="card"><div class="info-grid">
              ${money.filter((m) => m[1] !== null && m[1] !== undefined).map((m) => `
