@@ -1,0 +1,4 @@
+/* tail of app styles */
+.gallery-tile .pdf-badge {
+  position: absolute; top: 6px; left: 6px;
+}
