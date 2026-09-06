@@ -1,1 +1,117 @@
-PLACEHOLDER_WILL_REPLACE
+--- a/app.js
++++ b/app.js
+@@ -1111,24 +1111,73 @@
+     return `<img src="${esc(src)}" alt="Logo" class="${cls || "brand-mark-img"}"/>`;
+   }
+ 
+-  /* The window of five stages around whichever one is running now. */
+-  function stepperHtml(phases) {
++  /* Full milestone journey with per-phase progress bars + overall %. */
++  function stepperHtml(phases, overallPct) {
+     if (!phases.length) return emptyState("No timeline yet.");
+-    const firstIncomplete = phases.findIndex((p) => p.status !== "Completed");
+-    const currentIdx = firstIncomplete === -1 ? phases.length - 1 : firstIncomplete;
+-    const start = Math.max(0, currentIdx - 1);
+-    return `<div class="stepper">${phases.slice(start, start + 5).map((p, i) => {
+-      const g = start + i;
+-      const state = p.status === "Completed" ? "done" : g === currentIdx ? "current" : "upcoming";
+-      const meta = state === "done" ? `Completed${p.actual_end ? " · " + fmtDate(p.actual_end) : ""}`
+-        : state === "current" ? `In progress · ${p.progress_pct || 0}%`
+-        : `${p.status === "On Hold" ? "On hold" : "Starts"}${p.planned_start ? " · " + fmtDate(p.planned_start) : ""}`;
+-      return `<div class="step">
+-        ${i > 0 ? `<div class="${state === "upcoming" ? "step-line" : "step-line-fill"}"></div>` : ""}
+-        <div class="step-circle ${state}">${state === "done" ? icon("check", 15) : String(g + 1)}</div>
+-        <div class="step-name">${esc(p.name)}</div>
+-        <div class="step-meta">${meta}</div>
+-        ${state === "current" ? `<div class="step-progress-underline"></div>` : ""}
++    const ordered = phases.slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
++    const firstIncomplete = ordered.findIndex((p) => p.status !== "Completed");
++    const currentIdx = firstIncomplete === -1 ? ordered.length - 1 : firstIncomplete;
++    const doneCount = ordered.filter((p) => p.status === "Completed").length;
++    const pct = Math.round(overallPct != null ? overallPct : (doneCount / ordered.length) * 100);
++
++    const rows = ordered.map((p, i) => {
++      const state = p.status === "Completed" ? "done"
++        : p.status === "On Hold" ? "hold"
++        : i === currentIdx ? "current" : "upcoming";
++      const bar = Math.max(0, Math.min(100, Number(p.progress_pct) || (state === "done" ? 100 : 0)));
++      const dates = [
++        p.planned_start || p.actual_start ? fmtDate(p.actual_start || p.planned_start) : "",
++        p.planned_end || p.actual_end ? fmtDate(p.actual_end || p.planned_end) : "",
++      ].filter(Boolean).join(" → ");
++      return `<div class="vtl-row ${state}">
++        <div class="vtl-rail">
++          <div class="vtl-dot">${state === "done" ? icon("check", 14) : (i + 1)}</div>
++          ${i < ordered.length - 1 ? `<div class="vtl-line ${state === "done" ? "filled" : ""}"></div>` : ""}
++        </div>
++        <div class="vtl-body">
++          <div class="vtl-head">
++            <div class="vtl-title">${esc(p.name)}</div>
++            ${pill(p.status)}
++          </div>
++          <div class="vtl-meta">${dates || "Dates TBC"}${state === "current" || state === "done" ? " · " + bar + "%" : ""}</div>
++          <div class="progress-track vtl-track"><div class="progress-fill" style="width:${bar}%"></div></div>
++        </div>
+       </div>`;
+     }).join("")}</div>`;
+   }
++
++  /* Chronological site photo feed for the overview. */
++  function photoFeedHtml(limit) {
++    limit = limit || 8;
++    const rows = visible(D.site_media).slice().sort((a, b) =>
++      String(b.captured_on || b.created_at || "").localeCompare(String(a.captured_on || a.created_at || ""))
++    ).slice(0, limit);
++    if (!rows.length) return emptyState("No site photos yet. Updates will appear here as work progresses.");
++    return `<div class="photo-feed">${rows.map((m) => {
++      const url = m.file_id ? urlFor(m.file_id) : "";
++      const when = fmtDate(m.captured_on || m.created_at);
++      const label = [m.phase, m.area, m.category].filter(Boolean).join(" · ");
++      return `<div class="photo-feed-item" data-action="open-row" data-page="site_media" data-id="${esc(m.id)}" style="cursor:pointer">
++        <div class="photo-feed-thumb">${url
++          ? `<img src="${esc(url)}" alt="" loading="lazy"/>`
++          : `<div class="image-preview empty" style="width:100%;height:100%;border:none;border-radius:0;">${icon("image", 20)}</div>`}</div>
++        <div class="photo-feed-body">
++          <div class="photo-feed-when">${when}</div>
++          <div class="photo-feed-cap">${esc(m.caption || label || "Site update")}</div>
++          ${label && m.caption ? `<div class="photo-feed-meta">${esc(label)}</div>` : ""}
++        </div>
++      </div>`;
++    }).join("")}</div>`;
++  }
+ 
+@@ -1160,7 +1209,7 @@
+       .filter((x) => x.status === "Due" || x.status === "Upcoming")
+       .sort((a, b) => String(a.due_date || "").localeCompare(String(b.due_date || "")))[0];
+     const daysLeft = daysUntil(p.target_completion_date);
+-    const photos = visible(D.site_media).slice(0, 4);
++    const photos = visible(D.site_media); // used by photoFeedHtml via D.site_media
+     const docs = visible(D.documents).slice(0, 5);
+     const pct = Math.round(snap.overall_pct || 0);
+ 
+@@ -1220,7 +1269,7 @@
+               <h2 style="font-size:19px;">Current timeline</h2></div>
+             <button class="btn btn-sm btn-ghost" data-action="goto" data-page="milestones">View full timeline →</button>
+           </div>
+-          ${stepperHtml(phases)}
++          ${stepperHtml(phases, pct)}
+         </div>
+         <div class="card">
+           <div class="flex-between" style="margin-bottom:6px;">
+@@ -1243,10 +1292,13 @@
+       <div class="two-col" style="margin-top:22px;">
+         <div class="card">
+           <div class="flex-between" style="margin-bottom:10px;">
+-            <span class="section-title" style="margin:0;">Live Report</span>
+-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="site_media">All updates →</button>
++            <div>
++              <div class="eyebrow" style="margin-bottom:4px;">Site progress</div>
++              <span class="section-title" style="margin:0;">Photo feed</span>
++            </div>
++            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="site_media">All photos →</button>
+           </div>
+-          ${photos.length ? `<div class="gallery-grid">${photos.map((m) => tile("site_media", m)).join("")}</div>` : emptyState("No photos yet.")}
++          ${photoFeedHtml(8)}
+         </div>
+         <div class="card">
+           <div class="flex-between" style="margin-bottom:6px;">
