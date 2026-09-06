@@ -818,6 +818,42 @@
 
   function fileById(id) { return (D.files || []).find((f) => f.id === id) || null; }
 
+  /* A signed link is only good for a fixed time, and a drawing set is not a
+     thumbnail: 90 MB of CAD over a Yangon connection can take twenty
+     minutes, and every retry, pause or resume the browser makes after the
+     link has expired fails with nothing to explain it. So the life of the
+     link is set from the size of the file, budgeted at a pessimistic
+     30 KB/s, never under five minutes and never over six hours. */
+  const SLOW_BYTES_PER_SEC = 30 * 1024;
+  const HOUR = 3600;
+  function linkLife(bytes) {
+    const n = Number(bytes) || 0;
+    return Math.min(6 * HOUR, Math.max(300, Math.ceil((n / SLOW_BYTES_PER_SEC) * 1.5)));
+  }
+
+  // A browser's own PDF viewer fetches the whole file before it shows
+  // anything, so a very large one leaves a grey rectangle for minutes and
+  // often gives up - on a phone almost always. Past this, offer the
+  // download and say why instead of pretending to preview it.
+  const INLINE_PDF_LIMIT = 25 * 1048576;
+
+  const CAD_TYPES = /\.(dwg|dxf|rvt|rfa|skp|3dm|ifc|step|stp|iges|igs|max|blend)$/i;
+  function fileKind(f) {
+    if (!f) return "file";
+    const name = f.original_name || "";
+    if (/pdf$/i.test(f.mime_type || "") || /\.pdf$/i.test(name)) return "pdf";
+    if (/^image\//i.test(f.mime_type || "")) return "image";
+    if (CAD_TYPES.test(name)) return "cad";
+    return "file";
+  }
+  // "FILE" tells nobody what they are about to wait for. The real extension
+  // and the real size do.
+  function fileTag(f) {
+    if (!f) return "FILE";
+    const ext = (f.original_name || "").split(".").pop();
+    return (ext && ext.length <= 5 ? ext : "FILE").toUpperCase();
+  }
+
   /* Signed URLs last an hour; ask for them in one batch, not one by one. */
   async function refreshSignedUrls() {
     const paths = (D.files || []).filter((f) => !f.deleted_at).map((f) => f.storage_path);
@@ -911,8 +947,19 @@
   async function downloadFile(fileId) {
     const f = fileById(fileId);
     if (!f) return;
-    const { data, error } = await SB.storage.from(BUCKET).createSignedUrl(f.storage_path, 120, { download: f.original_name });
-    if (error) { setBanner("error", "Couldn't prepare that download: " + error.message); return; }
+    const big = (Number(f.size_bytes) || 0) > 8 * 1048576;
+    // A large file gives no sign it has started, so say so - otherwise the
+    // only feedback is nothing happening and people press it again.
+    if (big) setBanner("saved", `Starting ${f.original_name} (${fmtBytes(f.size_bytes)}). Large files can take a few minutes.`);
+    // Two minutes used to be the whole life of this link. A drawing set
+    // that takes longer than that to arrive - or that the browser retries
+    // after a dropped connection - failed with no explanation.
+    const { data, error } = await SB.storage.from(BUCKET)
+      .createSignedUrl(f.storage_path, linkLife(f.size_bytes), { download: f.original_name });
+    if (error || !data || !data.signedUrl) {
+      setBanner("error", "Couldn't prepare that download" + (error && error.message ? ": " + error.message : ". Please try again."));
+      return;
+    }
     const a = document.createElement("a");
     a.href = data.signedUrl; a.download = f.original_name;
     document.body.appendChild(a); a.click(); a.remove();
@@ -1414,16 +1461,21 @@
         </div>
       </div>
 
-      <div class="two-col">
-        <div class="card">
-          <div class="flex-between" style="margin-bottom:16px;">
-            <div><div class="eyebrow" style="margin-bottom:4px;">Project Journey</div>
-              <h2 style="font-size:19px;">Current timeline</h2></div>
-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="milestones">View full timeline →</button>
-          </div>
-          ${stepperHtml(phases)}
+      ${/* The timeline sat in a narrow column beside a much taller card,
+             which left a large empty patch down the middle of the page and
+             cut the last stage off at the column edge. It runs the full
+             width now, and Action Required pairs with a card its own size. */""}
+      <div class="card journey-card">
+        <div class="flex-between" style="margin-bottom:16px;">
+          <div><div class="eyebrow" style="margin-bottom:4px;">Project Journey</div>
+            <h2 style="font-size:19px;">Current timeline</h2></div>
+          <button class="btn btn-sm btn-ghost" data-action="goto" data-page="milestones">View full timeline →</button>
         </div>
-        <section class="card approval-overview">
+        ${stepperHtml(phases)}
+      </div>
+
+      <div class="dashboard-reports">
+        <section class="card report-card approval-overview">
           <div class="flex-between"><div class="eyebrow">Action Required</div><button class="report-link" data-action="goto" data-page="approvals">View all →</button></div>
           <h2>Waiting on client</h2>
           <div class="approval-counts"><span>${pending.length} awaiting decision</span><span class="pill pill-ok">${approved.length} approved</span></div>
@@ -1442,19 +1494,6 @@
           </div>
           ${approved.length ? `<div class="approval-approved"><h3>Approved</h3>${approved.slice(0,2).map(a => `<button class="approval-approved-row" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}"><span>${esc(a.title)}</span><span>${icon('check',14)} Approved</span></button>`).join('')}</div>` : ''}
         </section>
-      </div>
-
-      <div class="dashboard-reports">
-        <section class="card report-card" aria-labelledby="latest-updates-heading">
-          <div class="report-heading"><div><div class="eyebrow">Live Report</div><h2 id="latest-updates-heading">Latest updates</h2></div>
-            <button class="report-link" data-action="goto" data-page="site_media">All updates →</button></div>
-          ${updates.length ? `<ol class="report-timeline">${updates.map(m => `<li class="report-update">
-            <span class="report-date">${fmtDate(m.captured_on)}</span><span class="report-track" aria-hidden="true"></span>
-            <div class="report-update-body"><span class="report-tag">${esc(m.category || 'Site update')}</span>
-              <button class="report-update-title" data-action="open-row" data-page="site_media" data-id="${esc(m.id)}">${esc(m.caption || 'Site progress update')}</button>
-              ${(m.area || m.phase) ? `<p>${esc([m.area,m.phase].filter(Boolean).join(' · '))}</p>` : ''}</div>
-          </li>`).join('')}</ol>` : emptyState("Your team's latest site updates will appear here.")}
-        </section>
         <section class="card report-card" aria-labelledby="recent-documents-heading">
           <div class="report-heading"><div><div class="eyebrow">Document Center</div><h2 id="recent-documents-heading">Recent documents</h2></div>
             <button class="report-link" data-action="goto" data-page="documents">View all →</button></div>
@@ -1469,7 +1508,20 @@
           }).join('')}</div>` : emptyState('Project documents will appear here when your team adds them.')}
         </section>
       </div>
-      ${photos.length ? `<section class="card dashboard-site-preview"><div class="report-heading"><div><div class="eyebrow">On Site</div><h2>Latest site photos</h2></div><button class="report-link" data-action="goto" data-page="site_media">View gallery →</button></div><div class="gallery-grid">${photos.map(m => tile('site_media',m)).join('')}</div></section>` : ''}`;
+
+      <div class="dashboard-reports">
+        <section class="card report-card" aria-labelledby="latest-updates-heading">
+          <div class="report-heading"><div><div class="eyebrow">Live Report</div><h2 id="latest-updates-heading">Latest updates</h2></div>
+            <button class="report-link" data-action="goto" data-page="site_media">All updates →</button></div>
+          ${updates.length ? `<ol class="report-timeline">${updates.map(m => `<li class="report-update">
+            <span class="report-date">${fmtDate(m.captured_on)}</span><span class="report-track" aria-hidden="true"></span>
+            <div class="report-update-body"><span class="report-tag">${esc(m.category || 'Site update')}</span>
+              <button class="report-update-title" data-action="open-row" data-page="site_media" data-id="${esc(m.id)}">${esc(m.caption || 'Site progress update')}</button>
+              ${(m.area || m.phase) ? `<p>${esc([m.area,m.phase].filter(Boolean).join(' · '))}</p>` : ''}</div>
+          </li>`).join('')}</ol>` : emptyState("Your team's latest site updates will appear here.")}
+        </section>
+        ${photos.length ? `<section class="card report-card dashboard-site-preview"><div class="report-heading"><div><div class="eyebrow">On Site</div><h2>Latest site photos</h2></div><button class="report-link" data-action="goto" data-page="site_media">View gallery →</button></div><div class="gallery-grid">${photos.map(m => tile('site_media',m)).join('')}</div></section>` : ''}
+      </div>`;
   }
 
   /* ---- generic list pages ----------------------------------------- */
@@ -1518,8 +1570,12 @@
     const fid = row.file_id;
     if (fid && fileById(fid)) {
       const f = fileById(fid);
-      const isPdf = /pdf$/i.test(f.mime_type) || /\.pdf$/i.test(f.original_name);
-      return `<span class="pdf-chip" data-action="${isPdf ? "view-file" : "download-file"}" data-file="${esc(fid)}" data-stop="1" title="${esc(f.original_name)}">${icon("pdf",11)} ${isPdf ? "PDF" : "FILE"}</span>`;
+      const kind = fileKind(f);
+      // A drawing file cannot be previewed in any browser, so it says what
+      // it is and how big, and goes straight to the download.
+      const label = kind === "pdf" ? "PDF" : fileTag(f);
+      const size = f.size_bytes ? " " + fmtBytes(f.size_bytes) : "";
+      return `<span class="pdf-chip${kind === "cad" ? " cad-chip" : ""}" data-action="${kind === "pdf" ? "view-file" : "download-file"}" data-file="${esc(fid)}" data-stop="1" title="${esc(f.original_name + (f.size_bytes ? " · " + fmtBytes(f.size_bytes) : ""))}">${icon("pdf",11)} ${esc(label)}${esc(size)}</span>`;
     }
     if (row.external_url) return `<a class="pdf-chip" href="${esc(row.external_url)}" target="_blank" rel="noopener" data-stop="1">↗ LINK</a>`;
     return "";
@@ -1590,7 +1646,7 @@
             : `<div class="image-preview empty" style="width:100%;height:100%;border-radius:0;border:none;">${icon("image",22)}</div>`}
       ${row.category ? `<span class="cat-tag">${esc(row.category)}</span>` : ""}
       ${isPdf ? `<span class="pdf-badge" data-action="view-file" data-file="${esc(row.file_id)}" data-stop="1">PDF</span>`
-        : (f && !isImage) ? `<span class="pdf-badge" data-action="download-file" data-file="${esc(row.file_id)}" data-stop="1">FILE</span>`
+        : (f && !isImage) ? `<span class="pdf-badge" data-action="download-file" data-file="${esc(row.file_id)}" data-stop="1" title="${esc(f.original_name)}">${esc(fileTag(f))}${f.size_bytes ? " " + esc(fmtBytes(f.size_bytes)) : ""}</span>`
         : (!f && row.external_url) ? `<a class="pdf-badge" href="${esc(row.external_url)}" target="_blank" rel="noopener" data-stop="1">LINK ↗</a>` : ""}
       ${isStaff() && row.visibility === "internal" ? `<span class="pdf-badge" style="background:rgba(80,76,70,.92);left:auto;right:8px;bottom:34px;">INTERNAL</span>` : ""}
       <span class="cap">${esc(String(row[s.title] || "").slice(0, 60))}</span>
@@ -2190,20 +2246,39 @@
 
   /* ---- PDF viewer -------------------------------------------------- */
 
+  // Every reason the preview cannot be shown says which reason it is and
+  // offers the download, rather than leaving a grey rectangle and a hint in
+  // the footer telling people to work it out themselves.
+  function pdfFallbackHtml(fileId, headline, detail) {
+    return `<div class="pdf-fallback"><span style="color:var(--text-faint);">${icon("pdf",34)}</span>
+      <div class="pdf-fallback-head">${esc(headline)}</div>
+      ${detail ? `<div class="pdf-fallback-note">${esc(detail)}</div>` : ""}
+      <button class="btn btn-primary" data-action="download-file" data-file="${esc(fileId)}">${icon("download",14)} Download</button></div>`;
+  }
+
   function pdfViewerHtml() {
     const v = UI.pdfView;
+    let body;
+    if (v.tooBig) {
+      body = pdfFallbackHtml(v.fileId, "This drawing is too large to show in the page",
+        `${v.size} — the browser's viewer has to fetch all of it before anything appears, and usually gives up. Downloading is quicker and it opens properly.`);
+    } else if (v.failed) {
+      body = pdfFallbackHtml(v.fileId, "The preview couldn't be loaded",
+        "The link may have expired while the file was opening. Downloading still works.");
+    } else if (!canPreviewPdf()) {
+      body = pdfFallbackHtml(v.fileId, "This browser can't show PDFs inside a page", "");
+    } else {
+      body = `<div class="pdf-loading" data-pdf-loading><span class="pdf-spinner" aria-hidden="true"></span>
+          <div>Opening ${esc(v.name)}${v.size ? " · " + esc(v.size) : ""}…</div></div>
+        <object data="${esc(v.url)}" type="application/pdf" data-pdf-object><iframe src="${esc(v.url)}" title="${esc(v.name)}"></iframe></object>`;
+    }
     return `<div class="pdf-viewer-overlay" data-action="close-pdf-bg"><div class="pdf-viewer">
       <div class="pdf-viewer-head"><span style="color:var(--danger);display:flex;">${icon("pdf",18)}</span>
         <div class="pdf-viewer-title">${esc(v.name)}</div>
         <button class="btn btn-sm" data-action="download-file" data-file="${esc(v.fileId)}">${icon("download",13)} Download</button>
         <button class="icon-btn" data-action="close-pdf" aria-label="Close">${icon("close")}</button></div>
-      <div class="pdf-viewer-body">
-        ${canPreviewPdf() ? `<object data="${esc(v.url)}" type="application/pdf"><iframe src="${esc(v.url)}" title="${esc(v.name)}"></iframe></object>`
-          : `<div class="pdf-fallback"><span style="color:var(--text-faint);">${icon("pdf",34)}</span>
-             <div>This browser can't show PDFs inside a page.</div>
-             <button class="btn btn-primary" data-action="download-file" data-file="${esc(v.fileId)}">${icon("download",14)} Download</button></div>`}
-      </div>
-      <div class="pdf-viewer-foot"><span>${esc(v.size)}</span><span>Preview blank? Use Download.</span></div>
+      <div class="pdf-viewer-body">${body}</div>
+      <div class="pdf-viewer-foot"><span>${esc(v.size)}</span><span>${v.tooBig || v.failed ? "" : "Still blank after a while? Use Download."}</span></div>
     </div></div>`;
   }
   function canPreviewPdf() { try { return navigator.pdfViewerEnabled !== false; } catch (e) { return true; } }
@@ -2211,19 +2286,39 @@
   async function openPdf(fileId) {
     const f = fileById(fileId);
     if (!f || f.deleted_at) return;
+    const size = fmtBytes(f.size_bytes);
+
+    // Say straight away why a huge drawing is not going to be shown here,
+    // instead of opening a viewer that will sit grey and then fail.
+    if ((Number(f.size_bytes) || 0) > INLINE_PDF_LIMIT) {
+      UI.pdfView = { fileId, url: "", name: f.original_name, size, tooBig: true };
+      return render();
+    }
+
     try {
-      let url = urlFor(fileId);
-      if (!url) {
-        const { data, error } = await SB.storage.from(BUCKET).createSignedUrl(f.storage_path, 3600);
-        if (error || !data || !data.signedUrl) throw error || new Error("No preview link was returned.");
-        url = data.signedUrl;
-        SIGNED.set(f.storage_path, { url, expires: Date.now() + 3600 * 1000 });
-      }
-      UI.pdfView = { fileId, url, name: f.original_name, size: fmtBytes(f.size_bytes) };
+      // Always mint a fresh link rather than reusing a cached one that may
+      // have minutes left on it: the browser's viewer keeps range-requesting
+      // the file as someone scrolls, and those requests fail once it expires.
+      // Its life is set from the size, so a slow read cannot outlast it.
+      const { data, error } = await SB.storage.from(BUCKET)
+        .createSignedUrl(f.storage_path, Math.max(HOUR, linkLife(f.size_bytes)));
+      if (error || !data || !data.signedUrl) throw error || new Error("No preview link was returned.");
+      const url = data.signedUrl;
+      SIGNED.set(f.storage_path, { url, expires: Date.now() + Math.max(HOUR, linkLife(f.size_bytes)) * 1000 });
+
+      // One byte, to find out now whether the link actually works. Without
+      // this a dead link shows as a blank rectangle with no explanation.
+      let ok = true;
+      try {
+        const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
+        ok = probe.ok || probe.status === 206;
+      } catch (e) { ok = false; }
+
+      UI.pdfView = { fileId, url, name: f.original_name, size, failed: !ok };
       render();
     } catch (error) {
-      UI.pdfView = null;
-      setBanner("error", "Couldn't open that file. Please try opening it again or use Download.");
+      UI.pdfView = { fileId, url: "", name: f.original_name, size, failed: true };
+      render();
     }
   }
 
