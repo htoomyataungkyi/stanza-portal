@@ -1,0 +1,72 @@
+/* ---- Visual timeline (overview) -------------------------------- */
+.vtl { display: flex; flex-direction: column; gap: 18px; }
+.vtl-overall {
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.vtl-overall-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px;
+}
+.vtl-overall-top strong {
+  font-family: var(--font-display); font-size: 22px; color: var(--text); font-weight: 600;
+}
+.vtl-overall-bar { height: 10px; }
+.vtl-overall-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 7px; }
+
+.vtl-list { display: flex; flex-direction: column; }
+.vtl-row { display: flex; gap: 14px; min-height: 64px; }
+.vtl-rail {
+  display: flex; flex-direction: column; align-items: center; width: 28px; flex-shrink: 0;
+}
+.vtl-dot {
+  width: 28px; height: 28px; border-radius: 999px; display: flex; align-items: center;
+  justify-content: center; font-size: 11.5px; font-weight: 700; flex-shrink: 0; z-index: 1;
+  background: var(--step-upcoming-bg); color: var(--step-upcoming-fg);
+}
+.vtl-row.done .vtl-dot { background: var(--step-done-bg); color: var(--step-done-fg); }
+.vtl-row.current .vtl-dot {
+  background: var(--step-current-bg); color: var(--step-current-fg);
+  box-shadow: 0 0 0 5px var(--step-current-halo);
+}
+.vtl-row.hold .vtl-dot { background: var(--warn-soft); color: var(--warn); }
+.vtl-line {
+  flex: 1; width: 2px; min-height: 20px; background: var(--border); margin: 2px 0;
+}
+.vtl-line.filled { background: var(--step-done-bg); }
+.vtl-body { flex: 1; min-width: 0; padding-bottom: 16px; }
+.vtl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.vtl-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.vtl-meta { font-size: 11.5px; color: var(--text-faint); margin: 4px 0 8px; }
+.vtl-track { height: 6px; max-width: 280px; }
+.vtl-row.upcoming .vtl-track .progress-fill { background: var(--border); }
+.vtl-row.current .vtl-track .progress-fill { background: var(--accent); }
+.vtl-row.done .vtl-track .progress-fill { background: var(--ok); }
+
+/* ---- Photo feed ------------------------------------------------- */
+.photo-feed { display: flex; flex-direction: column; gap: 0; }
+.photo-feed-item {
+  display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border);
+  align-items: center;
+}
+.photo-feed-item:first-child { border-top: none; padding-top: 2px; }
+.photo-feed-thumb {
+  width: 72px; height: 72px; border-radius: var(--radius-sm); overflow: hidden;
+  flex-shrink: 0; background: var(--surface-2); border: 1px solid var(--border);
+}
+.photo-feed-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-feed-body { min-width: 0; flex: 1; }
+.photo-feed-when {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--accent-strong); margin-bottom: 3px;
+}
+.photo-feed-cap {
+  font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.photo-feed-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+
+@media (max-width: 560px) {
+  .photo-feed-thumb { width: 60px; height: 60px; }
+  .vtl-overall-top strong { font-size: 18px; }
+}
