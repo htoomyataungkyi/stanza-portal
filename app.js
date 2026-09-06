@@ -55,6 +55,7 @@
 
   const ICONS = {
     overview: '<path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6V11h-6v9Zm0-16v5h6V4h-6Z"/>',
+    bell: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
     project: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/>',
     timeline: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
     team: '<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.6"/><path d="M15 20a5 5 0 0 1 8.5-3.6"/>',
@@ -540,7 +541,7 @@
   const TABLES = ["milestones", "progress_snapshots", "design_revisions", "site_media",
                   "materials", "documents", "approvals", "site_issues", "variation_orders",
                   "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
-                  "project_team", "boq_items", "finance_summary"];
+                  "project_team", "boq_items", "finance_summary", "notifications"];
 
   let projectLoadVersion = 0;
   async function loadProjectData() {
@@ -556,11 +557,14 @@
     results.forEach((result, index) => {
       const table = TABLES[index];
       if (result.status === "rejected" || result.value.error) {
-        UI.dataErrors.push(SCHEMA[table] ? SCHEMA[table].label : ({files:"Files", payments:"Payments", progress_snapshots:"Progress", finance_summary:"Finance Summary"})[table] || "Project information");
+        UI.dataErrors.push(SCHEMA[table] ? SCHEMA[table].label : ({files:"Files", payments:"Payments", progress_snapshots:"Progress", finance_summary:"Finance Summary", notifications:"Messages"})[table] || "Project information");
       } else D[table] = result.value.data || [];
     });
     UI.dataLoading = false;
     sortAll();
+    // Staff can read the profiles behind a message; a client cannot, and
+    // is shown "Stanza team" instead.
+    if (isStaff()) await loadNoticeAudience();
     await refreshSignedUrls();
   }
 
@@ -853,8 +857,13 @@
       const s = SCHEMA[k]; if (!s) return;
       (groups[s.group] = groups[s.group] || []).push(k);
     });
+    const unread = unreadCount();
     let nav = `<button class="nav-item ${UI.page === "overview" ? "active" : ""}" data-action="goto" data-page="overview">
-        <span style="display:flex;align-items:center;gap:9px">${icon("overview")}Overview</span></button>`;
+        <span style="display:flex;align-items:center;gap:9px">${icon("overview")}Overview</span></button>
+      <button class="nav-item ${UI.page === "notices" ? "active" : ""}" data-action="goto" data-page="notices">
+        <span style="display:flex;align-items:center;gap:9px">${icon("bell")}Messages</span>
+        ${unread ? `<span class="nav-count nav-count-alert">${unread}</span>`
+                 : `<span class="nav-count">${noticeBatches().length}</span>`}</button>`;
 
     NAV_GROUPS.forEach((g) => {
       const keys = groups[g.key];
@@ -960,6 +969,9 @@
         <div class="topbar-greet-name">Welcome back${name ? ", " + esc(name.split(" ")[0]) : ""}</div>
       </div>
       <div class="topbar-right">
+        <button class="topbar-icon-btn" data-action="goto" data-page="notices"
+          title="${unreadCount() ? unreadCount() + " unread message" + (unreadCount() === 1 ? "" : "s") : "Messages"}"
+          aria-label="Messages">${icon("bell", 16)}${unreadCount() ? `<span class="topbar-icon-badge">${unreadCount()}</span>` : ""}</button>
         <div class="topbar-icon-btn" title="${pending} waiting on approval">${icon("warn", 16)}${pending ? `<span class="topbar-icon-badge">${pending}</span>` : ""}</div>
         <div class="topbar-user">
           <div class="avatar-chip">${esc(initials)}</div>
@@ -992,6 +1004,7 @@
     const loadState = projectLoadStateHtml();
     if (loadState && !["info", "settings", "access"].includes(UI.page)) return loadState;
     if (UI.page === "overview") return overviewHtml();
+    if (UI.page === "notices") return noticesHtml();
     if (UI.page === "info") return infoHtml();
     if (UI.page === "project") return projectPageHtml();
     if (UI.page === "finance") return financePageHtml();
@@ -1445,6 +1458,193 @@
     if (!data) throw new Error("Access was not updated. Please reload and try again.");
   }
 
+  /* ---- messages ---------------------------------------------------- */
+
+  // The table holds one row per recipient, grouped by batch_id: the same
+  // message sent to five people is five rows. A recipient has exactly one
+  // of them; the sender sees all five. Grouping here means the sender
+  // reads "sent to 5 · read by 2" instead of the same note five times.
+  function noticeBatches() {
+    const rows = (D.notifications || []).slice();
+    const byBatch = new Map();
+    rows.forEach((r) => {
+      const b = byBatch.get(r.batch_id) || {
+        batch_id: r.batch_id, title: r.title, body: r.body,
+        created_at: r.created_at, sender_id: r.sender_id, rows: [],
+      };
+      b.rows.push(r);
+      if (r.created_at < b.created_at) b.created_at = r.created_at;
+      byBatch.set(r.batch_id, b);
+    });
+    return Array.from(byBatch.values()).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  }
+
+  function myNotice(batch) {
+    return ME ? batch.rows.find((r) => r.recipient_id === ME.id) : null;
+  }
+
+  function unreadCount() {
+    if (!ME || UI.previewClient) return 0;
+    return (D.notifications || []).filter((r) => r.recipient_id === ME.id && !r.read_at).length;
+  }
+
+  function canSendNotice() {
+    return !UI.previewClient
+      && hasRole(["managing_director", "system_admin", "project_manager", "sales"]);
+  }
+
+  // Opening the page is what marks a message read, so a client does not
+  // have to do anything extra and the sender's count means something.
+  async function markNoticesRead() {
+    if (!ME || UI.previewClient) return;
+    const mine = (D.notifications || []).filter((r) => r.recipient_id === ME.id && !r.read_at);
+    if (!mine.length) return;
+    const stamp = new Date().toISOString();
+    const { error } = await SB.from("notifications")
+      .update({ read_at: stamp }).in("id", mine.map((r) => r.id));
+    if (error) return;                       // silent: reading is not the point of the visit
+    mine.forEach((r) => { r.read_at = stamp; });
+    render();
+  }
+
+  // Everyone with live access to this project, for the "choose people"
+  // list. Not the same as loadMembers(), which only senior staff may run.
+  async function loadNoticeAudience() {
+    if (!UI.projectId) { D.__audience = []; return; }
+    try {
+      const { data: mem, error } = await SB.from("project_members")
+        .select("user_id").eq("project_id", UI.projectId).is("revoked_at", null);
+      if (error) throw error;
+      const ids = (mem || []).map((m) => m.user_id).filter((id) => id !== (ME && ME.id));
+      if (!ids.length) { D.__audience = []; return; }
+      const { data: profs, error: e2 } = await SB.from("profiles")
+        .select("id, full_name, email, kind, role, status").in("id", ids);
+      if (e2) throw e2;
+      D.__audience = (profs || []).filter((p) => p.status === "active");
+    } catch (e) { D.__audience = []; }
+  }
+
+  function noticesHtml() {
+    const batches = noticeBatches();
+    const unread = unreadCount();
+    return `
+      <div class="page-head"><div><div class="eyebrow">${isStaff() && !UI.previewClient ? "Stanza Team" : "Client Portal"}</div>
+        <h1 class="page-title">Messages</h1>
+        <p class="page-sub">${batches.length
+          ? `${batches.length} message${batches.length === 1 ? "" : "s"}${unread ? ` · ${unread} unread` : ""}`
+          : "Notes from your Stanza project team."}</p></div>
+        ${canSendNotice() ? `<button class="btn btn-primary" data-action="compose-notice">${icon("plus",14)} New message</button>` : ""}
+      </div>
+      ${batches.length ? `<div class="action-list">${batches.map((b) => {
+        const mine = myNotice(b);
+        const iSent = ME && b.sender_id === ME.id;
+        const read = b.rows.filter((r) => r.read_at).length;
+        const meta = iSent
+          ? `Sent to ${b.rows.length} · read by ${read}`
+          : `${esc(senderName(b))} · ${fmtDateTime(b.created_at)}`;
+        return `<div class="action-item notice-item ${mine && !mine.read_at ? "unread" : ""}">
+          <div class="action-thumb">${icon("bell", 18)}</div>
+          <div class="action-body">
+            <div class="action-title">${esc(b.title)}${mine && !mine.read_at ? ` <span class="chip chip-peach">New</span>` : ""}</div>
+            <div class="notice-body">${esc(b.body || "")}</div>
+            <div class="action-meta">${meta}${iSent ? " · " + fmtDateTime(b.created_at) : ""}</div>
+          </div>
+        </div>`;
+      }).join("")}</div>` : emptyState("No messages yet.")}`;
+  }
+
+  function senderName(batch) {
+    const list = D.__audience || [];
+    const p = list.find((x) => x.id === batch.sender_id);
+    if (p) return p.full_name || p.email || "Stanza";
+    if (ME && batch.sender_id === ME.id) return "You";
+    return "Stanza team";
+  }
+
+  function fmtDateTime(v) {
+    if (!v) return "";
+    const d = new Date(v);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+      + " · " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function composeHtml(m) {
+    const people = D.__audience || [];
+    const clients = people.filter((p) => p.kind === "client").length;
+    return wrapModal("New message", `<div class="modal-body" id="notice-form">
+      <div class="form-grid">
+        <div class="field span-2"><label>Subject</label>
+          <input type="text" data-field="title" maxlength="120" placeholder="Site visit on Monday" value="${esc(m.title || "")}"/></div>
+        <div class="field span-2"><label>Message</label>
+          <textarea data-field="body" rows="5" placeholder="Write the note here.">${esc(m.body || "")}</textarea></div>
+        <div class="field span-2"><label>Who receives it</label>
+          <select data-field="audience" data-action="notice-audience">
+            <option value="all" ${m.audience === "all" ? "selected" : ""}>Everyone on this project (${people.length})</option>
+            <option value="clients" ${m.audience === "clients" ? "selected" : ""}>The client only (${clients})</option>
+            <option value="people" ${m.audience === "people" ? "selected" : ""}>Choose people…</option>
+          </select></div>
+        ${m.audience === "people" ? `<div class="field span-2"><label>Choose people</label>
+          <div class="notice-people">${people.length ? people.map((p) => `
+            <label class="notice-person"><input type="checkbox" data-person="${esc(p.id)}"
+              ${(m.chosen || []).includes(p.id) ? "checked" : ""}/>
+              <span><strong>${esc(p.full_name || p.email || "Someone")}</strong>
+              <span class="helper-text">${esc(p.kind === "client" ? "Client" : (p.role || "staff").replace(/_/g, " "))}</span></span></label>`).join("")
+            : `<span class="helper-text">Nobody else has access to this project yet.</span>`}</div></div>` : ""}
+        <div class="field span-2"><span class="helper-text">Everyone chosen sees it in the portal straight away. If email is switched on they also get a copy — the portal copy is the one that always arrives.</span></div>
+      </div></div>`,
+      `<span></span><div style="display:flex;gap:8px;">
+        <button class="btn" data-action="close-modal">Cancel</button>
+        <button class="btn btn-primary" data-action="send-notice" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Sending…" : "Send"}</button></div>`);
+  }
+
+  async function sendNotice() {
+    const form = document.getElementById("notice-form");
+    const val = (k) => { const el = form.querySelector(`[data-field="${k}"]`); return el ? el.value.trim() : ""; };
+    const title = val("title");
+    if (!title) return setBanner("error", "Please give the message a subject.");
+    const audience = val("audience") || "all";
+    const chosen = Array.from(form.querySelectorAll("[data-person]:checked")).map((el) => el.dataset.person);
+    if (audience === "people" && !chosen.length) return setBanner("error", "Please choose at least one person.");
+
+    UI.busy = true; render();
+    try {
+      const { data: batch, error } = await SB.rpc("send_notification", {
+        p_project: UI.projectId, p_title: title, p_body: val("body"),
+        p_audience: audience, p_user_ids: audience === "people" ? chosen : null,
+      });
+      if (error) throw error;
+
+      // The message is delivered the moment the rows exist. Email is a
+      // courtesy on top, so a mail problem is reported without pretending
+      // the message failed.
+      let mail = "";
+      try {
+        const { data: sess } = await SB.auth.getSession();
+        const res = await fetch(CFG.supabaseUrl + "/functions/v1/notify-email", {
+          method: "POST",
+          headers: {
+            apikey: CFG.supabaseKey,
+            Authorization: "Bearer " + (sess && sess.session ? sess.session.access_token : ""),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ batch_id: batch }),
+        });
+        const out = await res.json().catch(() => null);
+        if (out && out.sent) mail = ` and emailed to ${out.sent}`;
+        else if (out && out.reason) mail = " (email is not switched on yet)";
+        else if (out && out.failed) mail = " — the email copy could not be sent";
+      } catch (e) { mail = " — the email copy could not be sent"; }
+
+      UI.busy = false; UI.modal = null;
+      await loadProjectData();
+      setBanner("saved", "Message sent" + mail + ".");
+    } catch (e) {
+      UI.busy = false;
+      setBanner("error", (e && e.message) || "The message could not be sent.");
+    }
+  }
+
   /* ---- fields ------------------------------------------------------ */
 
   function renderFields(fields, values, readOnly) {
@@ -1553,6 +1753,7 @@
           <button class="btn" data-action="close-modal">Cancel</button>
           <button class="btn btn-primary" data-action="save-new-project" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Creating…" : "Create project"}</button></div>`);
     }
+    if (m.kind === "notice") return composeHtml(m);
     if (m.kind === "member") {
       return wrapModal("Give someone access", `<div class="modal-body" id="row-form">
         <div class="field span-2"><label>Their email address</label>
@@ -1667,7 +1868,8 @@
     if (pf && project()) Object.assign(project(), readFields(pf, PROJECT_FIELDS));
   }
 
-  const WRITE_ACTIONS = new Set(["new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member"]);
+  const WRITE_ACTIONS = new Set(["new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member",
+                                 "compose-notice", "send-notice"]);
 
   document.addEventListener("click", async (e) => {
     const anchor = e.target.closest("a[href]");
@@ -1718,6 +1920,7 @@
           e.preventDefault();
           UI.page = t.dataset.page; UI.search = ""; UI.filter = "All"; UI.sidebarOpen = false; UI.banner = null;
           if (UI.page === "access") await loadMembers();
+          if (UI.page === "notices") { render(); await markNoticesRead(); return; }
           return render();
         }
         case "set-filter": UI.filter = t.dataset.filter; return render();
@@ -1860,6 +2063,14 @@
           return setBanner("saved", "Password changed.");
         }
 
+        case "compose-notice": {
+          if (!canSendNotice()) return setBanner("error", "You do not have permission to send messages.");
+          await loadNoticeAudience();
+          UI.modal = { kind: "notice", audience: "all", chosen: [] };
+          return render();
+        }
+        case "send-notice": return sendNotice();
+
         case "add-member": UI.modal = { kind: "member", draft: {} }; return render();
         case "save-member": {
           const el = document.querySelector('#row-form input[data-field="email"]');
@@ -1904,6 +2115,17 @@
   }
 
   document.addEventListener("change", async (e) => {
+    // Switching who receives the message redraws the modal, so keep what
+    // has already been typed rather than making the person start again.
+    if (e.target.matches('[data-action="notice-audience"]') && UI.modal && UI.modal.kind === "notice") {
+      const form = document.getElementById("notice-form");
+      const read = (k) => { const el = form && form.querySelector(`[data-field="${k}"]`); return el ? el.value : ""; };
+      UI.modal.title = read("title");
+      UI.modal.body = read("body");
+      UI.modal.chosen = Array.from(document.querySelectorAll("[data-person]:checked")).map((el) => el.dataset.person);
+      UI.modal.audience = e.target.value;
+      return render();
+    }
     if (e.target.matches('[data-action="switch-project"]')) {
       UI.projectId = e.target.value; UI.page = "overview"; UI.search = ""; UI.filter = "All";
       UI.sidebarOpen = false;   // on a phone the menu covers the page it just opened
