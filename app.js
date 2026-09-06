@@ -1342,11 +1342,13 @@
       .sort((a, b) => String(a.due_date || "").localeCompare(String(b.due_date || "")))[0];
     const daysLeft = daysUntil(p.target_completion_date);
     const photos = visible(D.site_media).slice(0, 4);
-    const docs = visible(D.documents).slice(0, 5);
-    const pct = Math.round(snap.overall_pct || 0);
+    const docs = visible(D.documents).slice().sort((a,b) => String(b.uploaded_at || "").localeCompare(String(a.uploaded_at || ""))).slice(0, 4);
+    const updates = visible(D.site_media).slice().sort((a,b) => String(b.captured_on || "").localeCompare(String(a.captured_on || ""))).slice(0, 4);
+    const hasProgress = snap.overall_pct != null && Number.isFinite(Number(snap.overall_pct));
+    const pct = Math.max(0, Math.min(100, Math.round(Number(snap.overall_pct) || 0)));
 
     return `
-      <div class="hero-card">
+      <div class="hero-card dashboard-hero">
         <div class="hero-ring-deco"></div>
         <div>
           <div class="hero-live"><span class="hero-live-dot"></span>Live Project</div>
@@ -1359,10 +1361,10 @@
           </div>
         </div>
         <div class="hero-donut-wrap">
-          ${donut(pct)}
+          ${donut(pct, 232, 20)}
           <div style="position:absolute;display:flex;flex-direction:column;align-items:center;">
-            <div class="hero-donut-num">${pct}%</div>
-            <div class="hero-donut-label">Overall<br/>progress</div>
+            <div class="hero-donut-num">${hasProgress ? pct + "%" : "—"}</div>
+            <div class="hero-donut-label">${hasProgress ? "Overall<br/>progress" : "Awaiting update"}</div>
           </div>
         </div>
       </div>
@@ -1421,28 +1423,32 @@
         </div>
       </div>
 
-      <div class="two-col" style="margin-top:22px;">
-        <div class="card">
-          <div class="flex-between" style="margin-bottom:10px;">
-            <span class="section-title" style="margin:0;">Live Report</span>
-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="site_media">All updates →</button>
-          </div>
-          ${photos.length ? `<div class="gallery-grid">${photos.map((m) => tile("site_media", m)).join("")}</div>` : emptyState("No photos yet.")}
-        </div>
-        <div class="card">
-          <div class="flex-between" style="margin-bottom:6px;">
-            <span class="section-title" style="margin:0;">Document Center</span>
-            <button class="btn btn-sm btn-ghost" data-action="goto" data-page="documents">View all →</button>
-          </div>
-          ${docs.length ? `<div class="action-list">${docs.map((d) => `
-            <div class="action-item" data-action="open-row" data-page="documents" data-id="${esc(d.id)}" style="cursor:pointer;">
-              <div class="action-thumb">${icon("documents", 18)}</div>
-              <div class="action-body"><div class="action-title">${esc(d.name)}</div>
-              <div class="action-meta">${esc(d.folder || "")}${d.uploaded_at ? " · " + fmtDate(d.uploaded_at) : ""}</div></div>
-              ${pill(d.status)}
-            </div>`).join("")}</div>` : emptyState("No documents yet.")}
-        </div>
-      </div>`;
+      <div class="dashboard-reports">
+        <section class="card report-card" aria-labelledby="latest-updates-heading">
+          <div class="report-heading"><div><div class="eyebrow">Live Report</div><h2 id="latest-updates-heading">Latest updates</h2></div>
+            <button class="report-link" data-action="goto" data-page="site_media">All updates →</button></div>
+          ${updates.length ? `<ol class="report-timeline">${updates.map(m => `<li class="report-update">
+            <span class="report-date">${fmtDate(m.captured_on)}</span><span class="report-track" aria-hidden="true"></span>
+            <div class="report-update-body"><span class="report-tag">${esc(m.category || 'Site update')}</span>
+              <button class="report-update-title" data-action="open-row" data-page="site_media" data-id="${esc(m.id)}">${esc(m.caption || 'Site progress update')}</button>
+              ${(m.area || m.phase) ? `<p>${esc([m.area,m.phase].filter(Boolean).join(' · '))}</p>` : ''}</div>
+          </li>`).join('')}</ol>` : emptyState("Your team's latest site updates will appear here.")}
+        </section>
+        <section class="card report-card" aria-labelledby="recent-documents-heading">
+          <div class="report-heading"><div><div class="eyebrow">Document Center</div><h2 id="recent-documents-heading">Recent documents</h2></div>
+            <button class="report-link" data-action="goto" data-page="documents">View all →</button></div>
+          ${docs.length ? `<div class="report-documents">${docs.map(d => {
+            const f = d.file_id && fileById(d.file_id);
+            const fileLabel = f ? (/\.pdf$/i.test(f.original_name || '') ? 'PDF' : 'FILE') : 'DOC';
+            return `<div class="report-document"><span class="report-file-icon" aria-hidden="true">${fileLabel}</span>
+              <button class="report-document-info" data-action="open-row" data-page="documents" data-id="${esc(d.id)}"><strong>${esc(d.name)}</strong><span>${esc([d.folder, d.version, d.uploaded_at ? fmtDate(d.uploaded_at) : ''].filter(Boolean).join(' · '))}</span></button>
+              ${d.status ? pill(d.status) : ''}
+              ${f ? `<button class="report-download" data-action="download-file" data-file="${esc(d.file_id)}" aria-label="${esc('Download ' + d.name)}">${icon('download',22)}</button>` : ''}
+            </div>`;
+          }).join('')}</div>` : emptyState('Project documents will appear here when your team adds them.')}
+        </section>
+      </div>
+      ${photos.length ? `<section class="card dashboard-site-preview"><div class="report-heading"><div><div class="eyebrow">On Site</div><h2>Latest site photos</h2></div><button class="report-link" data-action="goto" data-page="site_media">View gallery →</button></div><div class="gallery-grid">${photos.map(m => tile('site_media',m)).join('')}</div></section>` : ''}`;
   }
 
   /* ---- generic list pages ----------------------------------------- */
