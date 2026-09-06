@@ -140,10 +140,17 @@
   function hasRole(list) {
     if (!isStaff()) return false;
     if (list.indexOf(ME.role) !== -1) return true;
-    /* Product Owner and Managing Director are the same level of access
-       under different names - the database treats them the same way, so
-       the buttons must too. */
+    /* Product Owner and Managing Director stand at the same level in the
+       policies, which name "managing_director" as the company-wide role.
+       Reading follows that; writing does not - see isViewOnly(). */
     return ME.role === "product_owner" && list.indexOf("managing_director") !== -1;
+  }
+
+  /* The Managing Director sees everything and changes nothing. The
+     database refuses the write either way; this keeps the portal from
+     offering a button that would only fail. */
+  function isViewOnly() {
+    return !!ME && ME.kind === "staff" && ME.role === "managing_director";
   }
   const WRITE_ROLES = {
   "approvals": [
@@ -215,11 +222,13 @@
   ]
 };
   function canEdit(resource = UI.page, operation = "UPDATE") {
-    if (!isStaff() || UI.previewClient) return false;
+    if (!isStaff() || UI.previewClient || isPortfolio() || isViewOnly()) return false;
     resource = ({overview:"progress_snapshots", finance:"finance_summary", project:"projects", access:"project_members"})[resource] || resource;
     if (resource === "projects") return hasRole(["managing_director", "project_manager", "system_admin"]);
     if (resource === "project_members") return hasRole(["managing_director", "project_manager", "sales", "system_admin"]);
-    if (hasRole(["managing_director"])) return true;
+    // The company-wide roles reach everything. A managing director is one
+    // of them for reading, and was already turned away above.
+    if (hasRole(["managing_director", "system_admin"])) return true;
     if (resource === "site_media" && operation === "INSERT" && hasRole(["subcontractor"])) return true;
     return hasRole(WRITE_ROLES[resource] || []);
   }
@@ -233,7 +242,20 @@
     rows = rows || [];
     return UI.previewClient ? rows.filter((r) => r.visibility !== "internal") : rows;
   }
-  function project() { return PROJECTS.find((p) => p.id === UI.projectId) || PROJECTS[0] || null; }
+  // Looking at every project at once rather than one of them. Reading
+  // only: the figures come from several projects, so there is nothing
+  // here that a Save button could sensibly write back to.
+  const ALL_PROJECTS = "__all";
+  function isPortfolio() { return UI.projectId === ALL_PROJECTS; }
+  function canSeeAllProjects() {
+    return isStaff() && !UI.previewClient
+      && hasRole(["managing_director", "system_admin"]) && PROJECTS.length > 1;
+  }
+
+  function project() {
+    if (isPortfolio()) return null;
+    return PROJECTS.find((p) => p.id === UI.projectId) || PROJECTS[0] || null;
+  }
 
   /* ---------------------------------------------------------------- */
   /* What each page is                                                 */
@@ -543,8 +565,32 @@
                   "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
                   "project_team", "boq_items", "finance_summary", "notifications"];
 
+  // The all-projects view needs a little from every project rather than
+  // everything from one, so it asks for its own narrow set. Row-level
+  // security still decides what comes back.
+  const PORTFOLIO_TABLES = ["progress_snapshots", "milestones", "finance_summary",
+                            "invoices", "payment_schedule", "approvals", "site_issues"];
+
   let projectLoadVersion = 0;
+
+  async function loadPortfolio() {
+    const version = ++projectLoadVersion;
+    D = {}; UI.dataErrors = []; UI.dataLoading = true;
+    const results = await Promise.allSettled(
+      PORTFOLIO_TABLES.map((t) => Promise.resolve().then(() => SB.from(t).select("*")))
+    );
+    if (version !== projectLoadVersion || !isPortfolio()) return;
+    results.forEach((r, i) => {
+      const t = PORTFOLIO_TABLES[i];
+      if (r.status === "rejected" || r.value.error) {
+        UI.dataErrors.push(SCHEMA[t] ? SCHEMA[t].label : t.replace(/_/g, " "));
+      } else D[t] = r.value.data || [];
+    });
+    UI.dataLoading = false;
+  }
+
   async function loadProjectData() {
+    if (isPortfolio()) return loadPortfolio();
     const version = ++projectLoadVersion;
     const pid = UI.projectId;
     D = {}; UI.dataErrors = []; UI.dataLoading = !!pid;
@@ -843,6 +889,7 @@
   }
 
   function pageLabel() {
+    if (isPortfolio() && !["info", "settings"].includes(UI.page)) return "All projects";
     if (UI.page === "overview") return "Overview";
     if (UI.page === "info") return "Contact & Legal";
     if (UI.page === "project") return "Project Info";
@@ -858,17 +905,25 @@
       (groups[s.group] = groups[s.group] || []).push(k);
     });
     const unread = unreadCount();
-    let nav = `<button class="nav-item ${UI.page === "overview" ? "active" : ""}" data-action="goto" data-page="overview">
+    // Every page below Overview reads one project's records, so in the
+    // all-projects view the menu is just the summary and the portal
+    // pages. Picking a project from the switcher brings the rest back.
+    let nav = isPortfolio()
+      ? `<button class="nav-item active" data-action="goto" data-page="overview">
+          <span style="display:flex;align-items:center;gap:9px">${icon("overview")}All projects</span>
+          <span class="nav-count">${PROJECTS.length}</span></button>`
+      : `<button class="nav-item ${UI.page === "overview" ? "active" : ""}" data-action="goto" data-page="overview">
         <span style="display:flex;align-items:center;gap:9px">${icon("overview")}Overview</span></button>
       <button class="nav-item ${UI.page === "notices" ? "active" : ""}" data-action="goto" data-page="notices">
         <span style="display:flex;align-items:center;gap:9px">${icon("bell")}Messages</span>
         ${unread ? `<span class="nav-count nav-count-alert">${unread}</span>`
                  : `<span class="nav-count">${noticeBatches().length}</span>`}</button>`;
 
-    NAV_GROUPS.forEach((g) => {
+    if (!isPortfolio()) NAV_GROUPS.forEach((g) => {
       const keys = groups[g.key];
       if (g.key === "admin") {
-        if (!canEdit("project_members")) return;
+        // A managing director reads these pages; they just cannot act on them.
+        if (!canEdit("project_members") && !isViewOnly()) return;
         nav += `<div class="nav-group-label">${esc(g.label)}</div>`;
         nav += navItem("access", "Project Access", "users", (D.__members || []).length);
         if (hasRole(["managing_director", "system_admin"])) nav += navItem("settings", "Portal Settings", "lock", null);
@@ -883,6 +938,9 @@
         nav += navItem(k, s.label, s.icon, (D[s.table] || []).length);
       });
     });
+    if (isPortfolio() && hasRole(["managing_director", "system_admin"])) {
+      nav += `<div class="nav-group-label">Admin</div>` + navItem("settings", "Portal Settings", "lock", null);
+    }
     nav += `<div class="nav-group-label">Portal</div>` + navItem("info", "Contact & Legal", "documents", null);
 
     const p = project();
@@ -905,6 +963,7 @@
       <div class="nav-group-label" style="padding-top:2px;">Your Project</div>
       ${PROJECTS.length > 1 || isStaff() ? `
         <select class="project-switcher" data-action="switch-project">
+          ${canSeeAllProjects() ? `<option value="${ALL_PROJECTS}" ${isPortfolio() ? "selected" : ""}>All projects (${PROJECTS.length})</option>` : ""}
           ${PROJECTS.map((pr) => `<option value="${esc(pr.id)}" ${pr.id === UI.projectId ? "selected" : ""}>${esc(pr.name)}${pr.code ? " (" + esc(pr.code) + ")" : ""}</option>`).join("")}
         </select>
         ${canManage ? `<button class="btn btn-sm btn-ghost" data-action="new-project" style="width:100%;margin-top:6px;">${icon("plus", 13)} New project</button>` : ""}
@@ -969,15 +1028,16 @@
         <div class="topbar-greet-name">Welcome back${name ? ", " + esc(name.split(" ")[0]) : ""}</div>
       </div>
       <div class="topbar-right">
-        <button class="topbar-icon-btn" data-action="goto" data-page="notices"
+        ${isPortfolio() ? "" : `<button class="topbar-icon-btn" data-action="goto" data-page="notices"
           title="${unreadCount() ? unreadCount() + " unread message" + (unreadCount() === 1 ? "" : "s") : "Messages"}"
           aria-label="Messages">${icon("bell", 16)}${unreadCount() ? `<span class="topbar-icon-badge">${unreadCount()}</span>` : ""}</button>
-        <div class="topbar-icon-btn" title="${pending} waiting on approval">${icon("warn", 16)}${pending ? `<span class="topbar-icon-badge">${pending}</span>` : ""}</div>
+        <div class="topbar-icon-btn" title="${pending} waiting on approval">${icon("warn", 16)}${pending ? `<span class="topbar-icon-badge">${pending}</span>` : ""}</div>`}
         <div class="topbar-user">
           <div class="avatar-chip">${esc(initials)}</div>
           <div>
             <div class="topbar-user-name">${esc(name)}</div>
-            <div class="topbar-user-role">${esc(UI.previewClient ? "Viewing as client" : roleLabel())}</div>
+            <div class="topbar-user-role">${esc(UI.previewClient ? "Viewing as client"
+              : roleLabel() + (isViewOnly() ? " · view only" : ""))}</div>
           </div>
         </div>
       </div>
@@ -993,6 +1053,13 @@
   }
 
   function pageHtml() {
+    if (isPortfolio()) {
+      const state = projectLoadStateHtml();
+      if (state && !["info", "settings"].includes(UI.page)) return state;
+      if (UI.page === "info") return infoHtml();
+      if (UI.page === "settings") return hasRole(["managing_director", "system_admin"]) ? settingsHtml() : portfolioHtml();
+      return portfolioHtml();
+    }
     if (!project()) {
       return canEdit("projects")
         ? `<div class="page-head"><div><div class="eyebrow">Stanza Team</div>
@@ -1008,7 +1075,12 @@
     if (UI.page === "info") return infoHtml();
     if (UI.page === "project") return projectPageHtml();
     if (UI.page === "finance") return financePageHtml();
-    if (UI.page === "access") return canEdit("project_members") ? accessHtml() : overviewHtml();
+    if (UI.page === "access") {
+      // A managing director may look at who has access without being
+      // able to change it.
+      return canEdit("project_members") || (isViewOnly() && hasRole(["managing_director"]))
+        ? accessHtml() : overviewHtml();
+    }
     if (UI.page === "settings") return !UI.previewClient && hasRole(["managing_director", "system_admin"]) ? settingsHtml() : overviewHtml();
     const s = SCHEMA[UI.page];
     if (!s) return overviewHtml();
@@ -1402,11 +1474,12 @@
   ];
 
   function settingsHtml() {
+    const readOnly = isViewOnly();
     return `<div class="page-head"><div><div class="eyebrow">Admin</div>
         <h1 class="page-title">Portal Settings</h1>
         <p class="page-sub">Shown to every client on every project.</p></div>
-        <button class="btn btn-primary" data-action="save-settings" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : "Save"}</button></div>
-      <div class="card" id="settings-form">${renderFields(SETTINGS_FIELDS, SETTINGS, false)}</div>`;
+        ${readOnly ? "" : `<button class="btn btn-primary" data-action="save-settings" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : "Save"}</button>`}</div>
+      <div class="card" id="settings-form">${renderFields(SETTINGS_FIELDS, SETTINGS, readOnly)}</div>`;
   }
 
   function accessHtml() {
@@ -1415,7 +1488,7 @@
     return `<div class="page-head"><div><div class="eyebrow">Admin</div>
         <h1 class="page-title">Project Access</h1>
         <p class="page-sub">Who can open <strong>${esc(project().name)}</strong>. Removing someone here removes their access immediately.</p></div>
-        <button class="btn btn-primary" data-action="add-member">${icon("plus",14)} Give someone access</button></div>
+        ${canEdit("project_members") ? `<button class="btn btn-primary" data-action="add-member">${icon("plus",14)} Give someone access</button>` : ""}</div>
       ${members.length ? `<div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Email</th><th>Username</th><th>Type</th><th>Since</th><th></th></tr></thead><tbody>
         ${members.map((m) => `<tr>
@@ -1424,7 +1497,7 @@
           <td>${esc(m.username || "—")}</td>
           <td>${esc(m.kind === "staff" ? (m.role || "staff").replace(/_/g, " ") : "client")}</td>
           <td>${fmtDate(m.granted_at)}</td>
-          <td><div class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-action="revoke-member" data-id="${esc(m.user_id)}">Remove</button></div></td>
+          <td><div class="row-actions">${canEdit("project_members") ? `<button class="btn btn-sm btn-ghost btn-danger" data-action="revoke-member" data-id="${esc(m.user_id)}">Remove</button>` : ""}</div></td>
         </tr>`).join("")}</tbody></table></div>` : emptyState("Nobody has been given access yet.")}
       <div class="card" style="margin-top:16px;">
         <div class="section-title" style="margin:0 0 6px;">Adding a client</div>
@@ -1458,6 +1531,108 @@
     if (!data) throw new Error("Access was not updated. Please reload and try again.");
   }
 
+  /* ---- every project at once --------------------------------------- */
+
+  // The newest progress reading for a project, since progress is kept as
+  // a series of snapshots rather than one number that gets overwritten.
+  function latestFor(rows, pid, dateKey) {
+    const mine = (rows || []).filter((r) => r.project_id === pid);
+    if (!mine.length) return null;
+    return mine.slice().sort((a, b) =>
+      String(b[dateKey] || b.created_at || "").localeCompare(String(a[dateKey] || a.created_at || "")))[0];
+  }
+
+  function portfolioRow(p) {
+    const progress = latestFor(D.progress_snapshots, p.id, "recorded_on");
+    const finance = (D.finance_summary || []).find((f) => f.project_id === p.id) || {};
+    const stages = (D.milestones || []).filter((m) => m.project_id === p.id);
+    const done = stages.filter((m) => /complete/i.test(m.status || "")).length;
+    const current = stages.slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+      .find((m) => /progress/i.test(m.status || "")) || null;
+    const waiting = (D.approvals || []).filter((a) =>
+      a.project_id === p.id && /pending/i.test(a.response || "")).length;
+    const openIssues = (D.site_issues || []).filter((i) =>
+      i.project_id === p.id && !/closed|resolved/i.test(i.status || "")).length;
+    const due = (D.payment_schedule || []).filter((x) =>
+      x.project_id === p.id && !/paid/i.test(x.status || ""))
+      .sort((a, b) => String(a.due_date || "").localeCompare(String(b.due_date || "")))[0] || null;
+    return {
+      project: p,
+      pct: progress ? Number(progress.overall_pct) || 0 : 0,
+      schedule: progress ? progress.schedule_status : null,
+      stages: stages.length, done, current, waiting, openIssues, due,
+      contract: Number(finance.revised_contract_value || finance.original_contract_value || 0),
+      invoiced: Number(finance.total_invoiced || 0),
+      paid: Number(finance.total_paid || 0),
+      outstanding: Number(finance.outstanding_balance || 0),
+    };
+  }
+
+  function portfolioHtml() {
+    const rows = PROJECTS.map(portfolioRow);
+    const sum = (k) => rows.reduce((t, r) => t + (r[k] || 0), 0);
+    const withProgress = rows.filter((r) => r.stages || r.pct);
+    const avg = withProgress.length
+      ? Math.round(withProgress.reduce((t, r) => t + r.pct, 0) / withProgress.length) : 0;
+    const attention = rows.filter((r) => /attention|delay|behind/i.test(r.schedule || "")).length;
+    const waiting = sum("waiting");
+
+    const kpi = (chip, label, value, note) => `
+      <div class="card kpi-card">
+        <div class="kpi-chip kpi-chip-${chip.tone}">${icon(chip.icon, 17)}</div>
+        <div><div class="kpi-card-label">${esc(label)}</div>
+          <div class="kpi-card-value">${value}</div>
+          <div class="kpi-card-note">${esc(note)}</div></div>
+      </div>`;
+
+    return `
+      <div class="page-head"><div><div class="eyebrow">Stanza Team</div>
+        <h1 class="page-title">All projects</h1>
+        <p class="page-sub">${PROJECTS.length} project${PROJECTS.length === 1 ? "" : "s"} · everything you have access to, read only. Pick one from the menu to work on it.</p></div>
+      </div>
+
+      <div class="grid kpi-grid">
+        ${kpi({icon: "timeline", tone: "peach"}, "Average progress", avg + "%",
+              attention ? `${attention} need attention` : "All on track")}
+        ${kpi({icon: "approvals", tone: "mint"}, "Waiting on clients", String(waiting),
+              waiting ? "Across all projects" : "Nothing outstanding")}
+        ${kpi({icon: "finance", tone: "neutral"}, "Contract value", fmtMMK(sum("contract")),
+              "Invoiced " + fmtMMK(sum("invoiced")))}
+        ${kpi({icon: "finance", tone: "blush"}, "Outstanding", fmtMMK(sum("outstanding")),
+              "Paid " + fmtMMK(sum("paid")))}
+      </div>
+
+      <div class="card" style="margin-top:22px;">
+        <div class="section-title" style="margin:0 0 4px;">Projects</div>
+        <div class="portfolio-list">
+          ${rows.map((r) => {
+            const p = r.project;
+            return `<div class="portfolio-row" data-action="open-project" data-id="${esc(p.id)}" role="button" tabindex="0">
+              <div class="portfolio-main">
+                <div class="portfolio-name">${esc(p.name)}</div>
+                <div class="portfolio-code">${esc(p.code || "")}${p.category ? " · " + esc(p.category) : ""}</div>
+                <div class="portfolio-chips">
+                  ${r.schedule ? pill(r.schedule) : ""}
+                  ${r.waiting ? `<span class="chip chip-warn">${r.waiting} waiting on client</span>` : ""}
+                  ${r.openIssues ? `<span class="chip chip-warn">${r.openIssues} open issue${r.openIssues === 1 ? "" : "s"}</span>` : ""}
+                </div>
+              </div>
+              <div class="portfolio-progress">
+                <div class="portfolio-bar"><span style="width:${Math.max(0, Math.min(100, r.pct))}%"></span></div>
+                <div class="portfolio-sub">${r.pct}% · ${r.done} of ${r.stages} stages</div>
+                <div class="portfolio-sub">${r.current ? esc(r.current.name) : "No stage in progress"}</div>
+              </div>
+              <div class="portfolio-money">
+                <div class="portfolio-amount">${fmtMMK(r.outstanding)}</div>
+                <div class="portfolio-sub">outstanding</div>
+                ${r.due ? `<div class="portfolio-sub">Next: ${fmtDate(r.due.due_date)}</div>` : ""}
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+
   /* ---- messages ---------------------------------------------------- */
 
   // The table holds one row per recipient, grouped by batch_id: the same
@@ -1489,7 +1664,7 @@
   }
 
   function canSendNotice() {
-    return !UI.previewClient
+    return !UI.previewClient && !isViewOnly()
       && hasRole(["managing_director", "system_admin", "project_manager", "sales"]);
   }
 
@@ -1891,6 +2066,9 @@
     if (UI.previewClient && WRITE_ACTIONS.has(a)) {
       return setBanner("readonly", "Client View is read-only. Switch to Admin to make changes.");
     }
+    if (isViewOnly() && WRITE_ACTIONS.has(a)) {
+      return setBanner("readonly", "Your account has view-only access. Ask the Product Owner to make this change.");
+    }
     if ((a === "close-modal" || a === "close-pdf-bg") && e.target !== t) return;
     if (a !== "search") {
       const sf = document.getElementById("settings-form");
@@ -2061,6 +2239,15 @@
           UI.busy = false; UI.modal = null;
           if (error) return setBanner("error", error.message);
           return setBanner("saved", "Password changed.");
+        }
+
+        case "open-project": {
+          UI.projectId = t.dataset.id; UI.page = "overview";
+          UI.search = ""; UI.filter = "All"; UI.banner = null;
+          const loading = loadProjectData();
+          render();
+          await loading;
+          return render();
         }
 
         case "compose-notice": {
