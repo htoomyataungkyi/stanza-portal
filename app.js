@@ -697,25 +697,32 @@
     </div></div>`;
   }
 
+  function authPasswordField(id, label, autocomplete) {
+    return `<div class="field"><label for="${id}">${esc(label)}</label>
+      <div class="password-control"><input type="password" id="${id}" autocomplete="${autocomplete}"/>
+        <button type="button" class="password-toggle" data-action="toggle-password" data-target="${id}" aria-controls="${id}" aria-label="Show ${esc(label.toLowerCase())}" aria-pressed="false">Show</button>
+      </div></div>`;
+  }
+
   function loginScreen() {
     return authShell("Sign in", "Your project's progress, drawings, documents and payments.", `
-      <div class="field"><label>Email or username</label><input type="text" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
-      <div class="field"><label>Password</label><input type="password" id="f-password" autocomplete="current-password"/></div>
+      <div class="field"><label for="f-email">Email or username</label><input type="text" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
+      ${authPasswordField("f-password", "Password", "current-password")}
       <button class="btn btn-primary" data-action="sign-in" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Signing in…" : "Sign in"}</button>
       <button class="btn btn-ghost" data-action="go-forgot" style="width:100%;margin-top:8px;">Forgot your password?</button>`);
   }
 
   function forgotScreen() {
     return authShell("Reset your password", "Enter the email address on your account and we'll send a link.", `
-      <div class="field"><label>Email</label><input type="email" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
+      <div class="field"><label for="f-email">Email</label><input type="email" id="f-email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"/></div>
       <button class="btn btn-primary" data-action="send-reset" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Sending…" : "Send the link"}</button>
       <button class="btn btn-ghost" data-action="go-login" style="width:100%;margin-top:8px;">Back to sign in</button>`);
   }
 
   function resetScreen() {
     return authShell("Choose a new password", "At least 8 characters.", `
-      <div class="field"><label>New password</label><input type="password" id="f-password" autocomplete="new-password"/></div>
-      <div class="field"><label>Type it again</label><input type="password" id="f-password2" autocomplete="new-password"/></div>
+      ${authPasswordField("f-password", "New password", "new-password")}
+      ${authPasswordField("f-password2", "Confirm new password", "new-password")}
       <button class="btn btn-primary" data-action="set-password" style="width:100%;margin-top:12px;" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save the password"}</button>`);
   }
 
@@ -1667,6 +1674,17 @@
     const t = e.target.closest("[data-action]");
     if (!t) return;
     const a = t.dataset.action;
+    if (a === "toggle-password") {
+      const input = document.getElementById(t.dataset.target);
+      if (!input || !["password", "text"].includes(input.type)) return;
+      const showing = input.type === "password";
+      input.type = showing ? "text" : "password";
+      t.textContent = showing ? "Hide" : "Show";
+      t.setAttribute("aria-pressed", String(showing));
+      const label = input.labels && input.labels[0] ? input.labels[0].textContent.toLowerCase() : "password";
+      t.setAttribute("aria-label", (showing ? "Hide " : "Show ") + label);
+      return;
+    }
     if (UI.previewClient && WRITE_ACTIONS.has(a)) {
       return setBanner("readonly", "Client View is read-only. Switch to Admin to make changes.");
     }

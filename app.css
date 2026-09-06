@@ -750,3 +750,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--text-faint); font-size: 14px; background: var(--bg);
 }
 .hero-next { margin-top: 14px; }
+
+/* Accessible sign-in controls. Keep the brand orange with dark text. */
+.login-card .btn-primary { color: #141A1F; font-weight: 600; min-height: 44px; justify-content: center; }
+.password-control { position: relative; }
+.login-card .password-control input { padding-right: 76px; min-height: 44px; }
+.password-toggle { position: absolute; top: 0; right: 0; bottom: 0; min-width: 68px; border: 0; border-radius: 0 8px 8px 0; background: transparent; color: #141A1F; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.password-toggle:hover { background: rgba(20, 26, 31, .06); }
+.password-toggle:focus-visible { outline: 2px solid #141A1F; outline-offset: 2px; }
