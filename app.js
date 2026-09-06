@@ -1349,7 +1349,8 @@
 
     return `
       <div class="hero-card dashboard-hero">
-        <div class="hero-ring-deco"></div>
+        <div class="hero-ring-deco" aria-hidden="true"></div>
+        <button class="glass-motion-toggle" data-action="toggle-glass-motion" aria-pressed="false" aria-label="Pause decorative motion">Pause motion</button>
         <div>
           <div class="hero-live"><span class="hero-live-dot"></span>Live Project</div>
           <div class="hero-title">${esc(p.name)}</div>
@@ -2268,6 +2269,15 @@
 
     try {
       switch (a) {
+        case 'toggle-glass-motion': {
+          const hero = t.closest('.dashboard-hero');
+          if (!hero) return;
+          const paused = hero.classList.toggle('glass-motion-paused');
+          t.setAttribute('aria-pressed', String(paused));
+          t.setAttribute('aria-label', paused ? 'Resume decorative motion' : 'Pause decorative motion');
+          t.textContent = paused ? 'Resume motion' : 'Pause motion';
+          return;
+        }
         case 'start-walkthrough': {
           const r = visible(D.walkthroughs).find(r => r.id === t.dataset.id);
           const url = r && walkthroughUrl(r.external_url);
