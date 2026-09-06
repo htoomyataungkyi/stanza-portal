@@ -1022,3 +1022,36 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    looked at yet. Only these carry the label, so the common case looks
    exactly as it did. */
 .pill.sent-back { display: inline-flex; vertical-align: middle; margin-left: 6px; font-size: 10.5px; padding: 2px 8px; }
+
+/* The timeline runs the full width of the page rather than sitting in a
+   narrow column: the stepper is horizontal, so the column was cutting the
+   last stage off mid-word and leaving a large empty patch beside it. */
+.journey-card { margin-bottom: 22px; }
+.dashboard-site-preview { margin-top: 0; }
+
+/* ---------- File preview ------------------------------------------ */
+/* The loading state sits behind the viewer, so the PDF simply covers it
+   when it paints - no script needed to take it away, and no grey nothing
+   while a large drawing is still arriving. */
+.pdf-viewer-body { position: relative; }
+.pdf-loading {
+  position: absolute; inset: 0; z-index: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 24px; text-align: center;
+  color: var(--text-muted); font-size: 13.5px;
+}
+.pdf-viewer-body > object { position: relative; z-index: 1; }
+.pdf-spinner {
+  width: 26px; height: 26px; border-radius: 999px;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: pdf-spin 0.9s linear infinite;
+}
+@keyframes pdf-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pdf-spinner { animation: none; } }
+
+.pdf-fallback-head { font-size: 15px; font-weight: 600; color: var(--text); max-width: 34ch; }
+.pdf-fallback-note { font-size: 13px; color: var(--text-muted); max-width: 46ch; line-height: 1.55; }
+
+/* A drawing file is not a document: nothing opens it in a browser, and it
+   is usually the largest thing in the project. */
+.cad-chip { background: var(--info-soft); color: var(--info); }
