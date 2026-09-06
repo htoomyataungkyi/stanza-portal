@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Stanza Client Portal</title>
-<meta name="description" content="Stanza Interior Design &amp; Decoration — client portal for project progress, drawings, documents and payments.">
+<meta name="description" content="Stanza Interior Design & Decoration — client portal for project progress, drawings, documents and payments.">
+<meta name="theme-color" content="#e85d04">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Stanza">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/logo-mark.png" type="image/png">
+<link rel="apple-touch-icon" href="/logo-mark.png">
 <link rel="stylesheet" href="/app.css">
 <!-- Google Fonts is the one thing still fetched from outside this site,
      and it is blocked on some Myanmar networks. Loaded as print and
@@ -23,5 +31,12 @@
   <script src="/supabase.js"></script>
   <script src="/config.js"></script>
   <script src="/app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("/sw.js").catch(function () {});
+      });
+    }
+  </script>
 </body>
 </html>
