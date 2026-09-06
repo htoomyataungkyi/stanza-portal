@@ -1332,9 +1332,12 @@
     const addr = (p.address || "").split(",").map((s) => s.trim()).filter(Boolean);
     const location = addr.length >= 2 ? addr[addr.length - 2] : (p.address || "—");
 
-    const phases = D.milestones || [];
+    const phases = visible(D.milestones).slice().sort((a,b) => (a.sequence || 0) - (b.sequence || 0));
+    const currentPhase = phases.find(m => ['In Progress','Pending Client Approval','On Hold'].includes(m.status)) || phases.find(m => m.status !== 'Completed');
+    const approved = visible(D.approvals).filter(a => a.response === 'Approved');
+    const canRespond = ME && ME.kind === 'client' && ME.status === 'active' && !UI.previewClient;
     const done = phases.filter((m) => m.status === "Completed").length;
-    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending");
+    const pending = visible(D.approvals).filter((a) => (a.response || "Pending") === "Pending").slice().sort((a,b) => String(a.deadline || "9999").localeCompare(String(b.deadline || "9999")));
     const nextDeadline = pending.slice().sort((a, b) =>
       String(a.deadline || "").localeCompare(String(b.deadline || "")))[0];
     const nextPay = visible(D.payment_schedule)
@@ -1359,6 +1362,10 @@
             <div><div class="hero-stat-label">Location</div><div class="hero-stat-value">${esc(location || "—")}</div></div>
             <div><div class="hero-stat-label">Project ID</div><div class="hero-stat-value">${esc(p.code || "—")}</div></div>
             <div><div class="hero-stat-label">Target handover</div><div class="hero-stat-value">${fmtDate(p.target_completion_date)}</div></div>
+          </div>
+          <div class="hero-project-facts">
+            <div><span>Current phase</span><strong>${esc(currentPhase ? currentPhase.name : phases.length ? 'All phases completed' : 'Not scheduled')}</strong><small>${esc(currentPhase ? currentPhase.status : '')}</small></div>
+            <div><span>${daysLeft !== null && daysLeft < 0 ? 'Days overdue' : 'Days left'}</span><strong class="hero-days">${daysLeft === null || !Number.isFinite(daysLeft) ? '—' : Math.abs(daysLeft)}</strong><small>${daysLeft === 0 ? 'Handover due today' : 'Until target handover'}</small></div>
           </div>
         </div>
         <div class="hero-donut-wrap">
@@ -1406,22 +1413,22 @@
           </div>
           ${stepperHtml(phases)}
         </div>
-        <div class="card">
-          <div class="flex-between" style="margin-bottom:6px;">
-            <div class="eyebrow" style="margin-bottom:4px;">Action Required</div>
-            ${pending.length ? `<span class="pill pill-danger">${pending.length}</span>` : ""}
-          </div>
-          <h2 style="font-size:19px;margin-bottom:6px;">${admin ? "Waiting on client" : "Waiting for you"}</h2>
+        <section class="card approval-overview">
+          <div class="flex-between"><div class="eyebrow">Action Required</div><button class="report-link" data-action="goto" data-page="approvals">View all →</button></div>
+          <h2>Waiting on client</h2>
+          <div class="approval-counts"><span>${pending.length} pending review</span><span class="pill pill-ok">${approved.length} approved</span></div>
+          ${canRespond ? '<p class="helper-text">Review the details, choose your decision and submit it.</p>' : ''}
           <div class="action-list">
-            ${pending.length ? pending.slice(0, 4).map((a) => `
-              <div class="action-item">
-                <div class="action-thumb">${esc((a.category || "?").slice(0, 2).toUpperCase())}</div>
-                <div class="action-body"><div class="action-title">${esc(a.title)}</div>
-                <div class="action-meta">${esc(a.category || "")}${a.deadline ? " · Due " + fmtDate(a.deadline) : ""}</div></div>
-                <button class="btn btn-primary btn-sm" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}">Review</button>
-              </div>`).join("") : emptyState("Nothing waiting on approval right now.")}
+            ${pending.length ? pending.slice(0,4).map(a => {
+              const left = daysUntil(a.deadline);
+              const overdue = Number.isFinite(left) && left < 0;
+              return `<div class="approval-overview-item"><div class="action-body"><div class="action-title">${esc(a.title)}</div><div class="action-meta">${esc(a.category || 'Approval request')}</div>
+                <div class="approval-deadline ${overdue ? 'is-overdue' : ''}">Deadline: ${a.deadline ? fmtDate(a.deadline) : 'Not set'}${Number.isFinite(left) ? ' · ' + (overdue ? Math.abs(left) + ' days overdue' : left === 0 ? 'Due today' : left + ' days left') : ''}</div></div>
+                <button class="btn btn-primary btn-sm" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}">${canRespond ? 'Review & approve' : 'Review'}</button></div>`;
+            }).join('') : emptyState('No requests waiting on the client.')}
           </div>
-        </div>
+          ${approved.length ? `<div class="approval-approved"><h3>Approved</h3>${approved.slice(0,2).map(a => `<button class="approval-approved-row" data-action="open-row" data-page="approvals" data-id="${esc(a.id)}"><span>${esc(a.title)}</span><span>${icon('check',14)} Approved</span></button>`).join('')}</div>` : ''}
+        </section>
       </div>
 
       <div class="dashboard-reports">
@@ -1629,7 +1636,7 @@
     return `<div class="page-head"><div><div class="eyebrow">${isStaff() ? "Stanza Team" : "Client Portal"}</div>
         <h1 class="page-title">Finance Summary</h1>
         <p class="page-sub">Contract value against what has been invoiced and paid.</p></div>
-        ${admin ? `<button class="btn btn-primary" data-action="save-finance" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : "Save"}</button>` : ""}</div>
+        ${admin ? `<button class="btn btn-primary" data-action="save-finance" ${UI.busy ? "disabled" : ""}>${icon("check",14)} ${UI.busy ? "Saving…" : m.page === "approvals" && hasClientEditable(s) ? "Submit decision" : "Save"}</button>` : ""}</div>
       ${admin ? `<div class="card" id="finance-form">${renderFields(FINANCE_FIELDS, fs, false)}</div>`
         : `<div class="card"><div class="info-grid">
              ${money.filter((m) => m[1] !== null && m[1] !== undefined).map((m) => `

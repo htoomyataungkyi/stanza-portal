@@ -991,3 +991,24 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
  .dashboard-hero:before,.dashboard-hero:after,.dashboard-hero .hero-ring-deco,.dashboard-hero .hero-donut-wrap:before,.dashboard-hero .hero-donut-wrap svg circle:last-child { animation:none; }
  .dashboard-hero .glass-motion-toggle { display:none; }
 }
+
+/* Phase, handover countdown and actionable approval summary. */
+.hero-project-facts { display:flex; gap:14px; flex-wrap:wrap; margin-top:26px; }
+.hero-project-facts > div { padding:15px 20px; min-width:140px; max-width:340px; border:1px solid #ffffff28; border-radius:16px; background:linear-gradient(135deg,#ffffff10,#ffffff04); box-shadow:inset 0 1px 0 #ffffff16; }
+.hero-project-facts span,.hero-project-facts small { display:block; font-size:11px; color:#cbd0d4; line-height:1.5; }
+.hero-project-facts strong { display:block; font-size:17px; color:#fff; margin:6px 0; overflow-wrap:anywhere; }
+.hero-project-facts .hero-days { font-size:30px; line-height:1; font-family:var(--font-display); }
+.approval-overview h2 { font-family:var(--font-display); font-size:26px; margin:8px 0 14px; }
+.approval-counts { display:flex; gap:12px; align-items:center; margin-bottom:16px; color:var(--text-muted); font-size:12px; }
+.approval-overview-item { display:flex; gap:16px; align-items:center; padding:18px 0; border-top:1px solid var(--border); }
+.approval-overview-item .action-body { min-width:0; overflow-wrap:anywhere; }
+.approval-overview-item .btn { flex-shrink:0; min-height:44px; }
+.approval-deadline { font-size:12px; color:var(--text-muted); line-height:1.6; margin-top:8px; }
+.approval-deadline.is-overdue { color:var(--danger); font-weight:600; }
+.approval-approved { border-top:1px solid var(--border); padding-top:16px; margin-top:8px; }
+.approval-approved h3 { font-size:13px; margin-bottom:8px; }
+.approval-approved-row { display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%; padding:12px 0; min-height:44px; background:none; border:0; color:var(--text); text-align:left; font:inherit; font-size:12px; cursor:pointer; }
+.approval-approved-row > span:first-child { overflow-wrap:anywhere; min-width:0; }
+.approval-approved-row > span:last-child { display:flex; align-items:center; gap:5px; color:var(--text-muted); flex-shrink:0; }
+.approval-approved-row:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+@media(max-width:600px) { .hero-project-facts { gap:10px; } .hero-project-facts > div { min-width:110px; padding:12px 14px; } .approval-overview-item { flex-wrap:wrap; } .approval-overview-item .action-body { flex-basis:100%; } }
