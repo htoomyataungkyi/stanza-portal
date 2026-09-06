@@ -614,6 +614,148 @@
     await refreshSignedUrls();
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Keeping the page current                                          */
+  /* ---------------------------------------------------------------- */
+  // Supabase can push changes as they happen, but that needs a WebSocket,
+  // and a WebSocket cannot travel through the /api rewrite that keeps the
+  // portal on a single address. It would have to reach supabase.co
+  // directly - the address that is blocked here without a VPN. Measured,
+  // not assumed: straight to Supabase answers "101 Switching Protocols",
+  // the same request through the site's own /api answers 500.
+  //
+  // So the portal asks again on a timer instead, using the same ordinary
+  // requests that already work on this network. A client sees a new
+  // message or a new photo within a minute without touching anything.
+
+  // One round costs about 40 KB. Checking every 45 seconds all day would
+  // spend a few megabytes of someone's phone data on a page where nothing
+  // is happening, so the wait doubles each time nothing has changed and
+  // drops back to 45 seconds the moment something does - or the moment
+  // they come back to the tab. Busy afternoon: quick. Quiet week: cheap.
+  const REFRESH_EVERY = 45000;
+  const REFRESH_AT_MOST = 240000;
+  let refreshTimer = null;
+  let refreshWait = REFRESH_EVERY;
+  let refreshing = false;
+
+  function stopAutoRefresh() {
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+  }
+
+  function startAutoRefresh(wait) {
+    stopAutoRefresh();
+    refreshWait = wait || REFRESH_EVERY;
+    refreshTimer = setTimeout(async () => {
+      const changed = await quietRefresh();
+      if (UI.screen !== "app") return;
+      startAutoRefresh(
+        changed === true  ? REFRESH_EVERY                                 // something happened: stay quick
+        : changed === false ? Math.min(refreshWait * 2, REFRESH_AT_MOST)  // nothing did: ease off
+        : refreshWait                                                     // did not run: same rhythm
+      );
+    }, refreshWait);
+  }
+
+  // Never interrupt someone. Not while a form is open, a file is being
+  // read, the menu is out, or a box has the cursor in it - replacing the
+  // page under any of those loses what they were doing. And nothing at all
+  // while the tab is in the background: it would spend their data for a
+  // screen no one is looking at.
+  function nobodyIsMidTask() {
+    if (UI.screen !== "app") return false;
+    if (UI.busy || UI.modal || UI.pdfView || UI.sidebarOpen) return false;
+    if (document.visibilityState !== "visible") return false;
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return false;
+    return true;
+  }
+
+  function refreshIsSafe() { return !refreshing && nobodyIsMidTask(); }
+
+  // The database returns rows in whatever order suits it, and the copy the
+  // page is holding has already been sorted for display. Comparing the two
+  // as they stand says "changed" every single time - which redraws the page
+  // under someone every 45 seconds and defeats the easing-off above. Line
+  // them up by id first so the answer means what it says.
+  function canonical(rows) {
+    return JSON.stringify(
+      [...rows].sort((a, b) => String(a && a.id).localeCompare(String(b && b.id)))
+    );
+  }
+
+  // Same requests as loadProjectData, but it does not empty D first and
+  // does not raise the loading state, so the page never blinks. Anything
+  // that fails is simply left as it was until the next round.
+  //
+  // Answers true if something had changed, false if nothing had, and null
+  // if it did not run at all - which is what decides how long to wait
+  // before asking again.
+  async function quietRefresh() {
+    if (!refreshIsSafe()) return null;
+    refreshing = true;
+    try {
+      const version = projectLoadVersion;
+      const pid = UI.projectId;
+      const portfolio = isPortfolio();
+      const tables = portfolio ? PORTFOLIO_TABLES : TABLES;
+      if (!portfolio && !pid) return null;
+
+      const results = await Promise.allSettled(tables.map((table) =>
+        Promise.resolve().then(() => {
+          const q = SB.from(table).select("*");
+          return portfolio ? q : q.eq("project_id", pid);
+        })
+      ));
+
+      // A project switch or a sign-out while these were in flight wins.
+      if (version !== projectLoadVersion || pid !== UI.projectId || UI.screen !== "app") return null;
+      // They may have opened a form while these were in flight.
+      if (!nobodyIsMidTask()) return null;
+
+      const before = unreadCount();
+      let changed = false;
+      results.forEach((result, index) => {
+        if (result.status === "rejected" || result.value.error) return;
+        const table = tables[index];
+        const rows = result.value.data || [];
+        if (canonical(rows) !== canonical(D[table] || [])) changed = true;
+        D[table] = rows;
+      });
+      if (!changed) return false;
+
+      sortAll();
+      if (isStaff()) await loadNoticeAudience();
+      await refreshSignedUrls();
+      if (version !== projectLoadVersion || UI.screen !== "app" || !nobodyIsMidTask()) return true;
+
+      const gained = unreadCount() - before;
+      // Redrawing scrolls back to the top otherwise, which reads as the
+      // page having jumped on its own.
+      const y = window.scrollY;
+      if (gained > 0 && UI.page !== "notices") {
+        UI.banner = { type: "saved", text: gained === 1 ? "You have a new message." : `You have ${gained} new messages.` };
+      }
+      render();
+      window.scrollTo(0, y);
+      return true;
+    } catch (e) {
+      // A refresh that fails is not worth telling anyone about; the page
+      // still shows what it had, and the next round tries again.
+      return null;
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // Coming back to the tab is the moment someone actually wants to see
+  // what changed, so do not make them wait out the timer.
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible" || UI.screen !== "app") return;
+    await quietRefresh();
+    startAutoRefresh();          // back to the quick rhythm while they are here
+  });
+
   function projectLoadStateHtml() {
     if (UI.dataLoading) return `<div class="empty-state" role="status">Loading project information…</div>`;
     if (!(UI.dataErrors || []).length) return "";
@@ -843,6 +985,7 @@
   }
 
   async function doSignOut() {
+    stopAutoRefresh();
     await SB.auth.signOut();
     ME = null; PROJECTS = []; D = {}; SIGNED.clear();
     UI.screen = "login"; UI.page = "overview"; UI.projectId = null;
@@ -2380,6 +2523,7 @@
     await loadProjectData();
     UI.screen = "app"; UI.page = "overview";
     render();
+    startAutoRefresh();
   }
 
   async function boot() {
