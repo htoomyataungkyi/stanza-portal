@@ -1,0 +1,29 @@
+/* ---- PWA / notched phones --------------------------------------- */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .topbar-mobile {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .sidebar.open {
+    padding-top: env(safe-area-inset-top);
+  }
+  .main-inner {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Slightly larger tap targets on touch devices */
+@media (hover: none) and (pointer: coarse) {
+  .btn, .icon-btn, .nav-item, .pill {
+    min-height: 44px;
+  }
+  .icon-btn {
+    min-width: 44px;
+  }
+}
