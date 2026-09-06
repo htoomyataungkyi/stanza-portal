@@ -1,0 +1,67 @@
+--- a/app.js
++++ b/app.js
+@@ -135,6 +135,69 @@
+   let SETTINGS = {};         // portal_settings row
+   let D = {};                // the current project's records, by table name
+   const SIGNED = new Map();  // storage_path -> { url, expires }
++
++  /* Realtime: one channel per open project. Debounced reload keeps the UI
++     calm when several rows change at once (e.g. a batch of messages). */
++  let realtimeChannel = null;
++  let realtimeReloadTimer = null;
++  const REALTIME_TABLES = [
++    "notifications", "progress_snapshots", "milestones", "design_revisions",
++    "site_media", "documents", "approvals", "materials", "site_issues",
++    "variation_orders", "quotations", "meetings", "payment_schedule",
++    "invoices", "payments", "files",
++  ];
++
++  function stopRealtime() {
++    if (realtimeReloadTimer) { clearTimeout(realtimeReloadTimer); realtimeReloadTimer = null; }
++    if (realtimeChannel) {
++      try { SB.removeChannel(realtimeChannel); } catch (e) {}
++      realtimeChannel = null;
++    }
++  }
++
++  function scheduleRealtimeReload(hint) {
++    if (UI.screen !== "app" || UI.busy || UI.modal || UI.pdfView) return;
++    if (realtimeReloadTimer) clearTimeout(realtimeReloadTimer);
++    realtimeReloadTimer = setTimeout(async () => {
++      realtimeReloadTimer = null;
++      if (UI.screen !== "app" || !UI.projectId) return;
++      try {
++        await loadProjectData();
++        render();
++        if (hint) setBanner("saved", hint);
++      } catch (e) { /* silent: next user action will retry */ }
++    }, 600);
++  }
++
++  function startRealtime(projectId) {
++    stopRealtime();
++    if (!projectId || projectId === ALL_PROJECTS || !ME) return;
++    let ch = SB.channel("project:" + projectId);
++    REALTIME_TABLES.forEach((table) => {
++      ch = ch.on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: table, filter: "project_id=eq." + projectId },
++        (payload) => {
++          const tableName = table;
++          let hint = "Project updated.";
++          if (tableName === "notifications") hint = "New message received.";
++          else if (tableName === "progress_snapshots" || tableName === "milestones") hint = "Progress updated.";
++          else if (tableName === "site_media") hint = "New site photo available.";
++          else if (tableName === "design_revisions") hint = "Drawing updated.";
++          else if (tableName === "approvals") hint = "Approval status changed.";
++          else if (tableName === "invoices" || tableName === "payments" || tableName === "payment_schedule") hint = "Payment information updated.";
++          if (isStaff() && !UI.previewClient && tableName !== "notifications") hint = null;
++          scheduleRealtimeReload(hint);
++        }
++      );
++    });
++    ch.subscribe(() => {});
++    realtimeChannel = ch;
++  }
++
+   function isStaff() { return !!ME && ME.status === "active" && ME.kind === "staff"; }
