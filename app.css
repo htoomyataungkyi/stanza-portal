@@ -691,7 +691,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .field input[type=time], .field input[type=email], .field input[type=password],
   .field input[type=url], .field input[type=tel], .field input[type=search],
   .field textarea, .field select,
-  .field input, .search-input { font-size: 16px; }
+  .field input, .search-input,
+  /* The project switcher lives in the menu, which is off-canvas on a phone,
+     so it was missed when the rest were fixed. Its own class outweighs the
+     plain `select` above, and at 12.5px opening the menu and tapping it
+     zoomed the whole portal in with no way back. */
+  .project-switcher { font-size: 16px; }
   .table-wrap::after {
     content: "Swipe the table sideways to see more →";
     display: block; padding: 8px 14px; font-size: 11px; color: var(--text-faint);
@@ -1012,3 +1017,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .approval-approved-row > span:last-child { display:flex; align-items:center; gap:5px; color:var(--text-muted); flex-shrink:0; }
 .approval-approved-row:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 @media(max-width:600px) { .hero-project-facts { gap:10px; } .hero-project-facts > div { min-width:110px; padding:12px 14px; } .approval-overview-item { flex-wrap:wrap; } .approval-overview-item .action-body { flex-basis:100%; } }
+
+/* An approval the client sent back, marked apart from ones simply not
+   looked at yet. Only these carry the label, so the common case looks
+   exactly as it did. */
+.pill.sent-back { display: inline-flex; vertical-align: middle; margin-left: 6px; font-size: 10.5px; padding: 2px 8px; }
