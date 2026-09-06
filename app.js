@@ -694,6 +694,7 @@
       ${UI.authError ? `<div class="banner error">${icon("warn", 15)}<span>${esc(UI.authError)}</span></div>` : ""}
       ${UI.authNote ? `<div class="banner saved">${icon("check", 15)}<span>${esc(UI.authNote)}</span></div>` : ""}
       ${body}
+      ${CFG.supportPhone ? `<p class="login-support">Can't sign in? <a href="tel:${esc(CFG.supportPhone)}">Contact support<span class="support-number">${esc(CFG.supportPhoneLabel || CFG.supportPhone)}</span></a></p>` : ""}
     </div></div>`;
   }
 

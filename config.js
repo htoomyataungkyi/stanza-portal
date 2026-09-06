@@ -14,5 +14,7 @@ window.STANZA_CONFIG = {
     supabaseUrl: "https://uwlwgozawtcrpekcycce.supabase.co",
   supabaseKey: "sb_publishable_DMYdwpJzW4f-JwwM4rpmRg_T6-3F2rU",
   // Shown on the login screen and in the footer.
+  supportPhone: "+959255255210",
+  supportPhoneLabel: "09 255 255 210",
   companyName: "Stanza Interior Design & Decoration",
 };

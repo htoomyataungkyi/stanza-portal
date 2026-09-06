@@ -758,3 +758,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .password-toggle { position: absolute; top: 0; right: 0; bottom: 0; min-width: 68px; border: 0; border-radius: 0 8px 8px 0; background: transparent; color: #141A1F; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .password-toggle:hover { background: rgba(20, 26, 31, .06); }
 .password-toggle:focus-visible { outline: 2px solid #141A1F; outline-offset: 2px; }
+
+.login-support { margin: 18px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.login-support a { display: inline-block; min-height: 44px; color: #141A1F; text-decoration: underline; text-underline-offset: 3px; }
+.login-support a:focus-visible { outline: 2px solid #141A1F; outline-offset: 2px; }
+.support-number { display: block; }
