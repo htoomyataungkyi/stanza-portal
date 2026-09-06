@@ -22,6 +22,7 @@ public/
   index.html      the page
   app.js          the whole application
   app.css         styling, light and dark
+  progress.css    visual timeline + photo feed (overview)
   config.js       which Supabase project to talk to  <- the only file to edit
   vendor/
     supabase.js   the Supabase client, kept here so there is no build step
@@ -30,6 +31,19 @@ vercel.json       security headers and single-page routing
 
 No npm install, no build. Editing a file and re-deploying is the whole
 workflow.
+
+## Visual Progress Timeline + Photo Feed
+
+Styles ship in `progress.css` (linked from `index.html`).
+
+To enable the new Overview UI (full milestone bars + overall % + photo feed),
+apply the patch:
+
+```sh
+patch -p1 < patches/overview-timeline.patch
+# or: git apply patches/overview-timeline.patch
+git add app.js && git commit -m "Overview: visual progress timeline + photo feed" && git push
+```
 
 ## Deploying
 
