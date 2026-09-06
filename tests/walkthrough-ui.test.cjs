@@ -1,0 +1,7 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const ctx={URL,console,window:{STANZA_CONFIG:{},supabase:{createClient:()=>({})}},document:{addEventListener(){}},setTimeout,clearTimeout};
+const source=fs.readFileSync('app.js','utf8').replace('  boot();\n})();',`window.qa={UI,canEdit,walkthroughUrl,walkthroughsHtml,setup(role,kind='staff'){ME={id:'user',role,kind,status:'active'};PROJECTS=[{id:'p',name:'Nova'}];UI.projectId='p';UI.previewClient=false;D={walkthroughs:[{id:'w',title:'Nova <script>',mode:'3D walkthrough',status:'Ready',model:{areas:[]}}]};}};\n})();`);
+vm.runInNewContext(source,ctx);const q=ctx.window.qa;let n=0;for(const [role,allow] of [['product_owner',true],['managing_director',false],['project_manager',true],['designer',true],['finance',false],['system_admin',true]]){q.setup(role);assert.equal(q.canEdit('walkthroughs'),allow,role);n++;}
+q.setup(null,'client');assert(!q.canEdit('walkthroughs'));assert(q.walkthroughsHtml().includes('Start walkthrough'));assert(!q.walkthroughsHtml().includes('Edit walkthrough'));assert(!q.walkthroughsHtml().includes('<script>'));n+=4;
+for(const u of ['javascript:alert(1)','http://example.com','https://name:secret@example.com']){assert(!q.walkthroughUrl(u));n++;}assert(q.walkthroughUrl('https://example.com/tour'));n++;
+console.log(n+' walkthrough UI permission, launch and escaping assertions passed');

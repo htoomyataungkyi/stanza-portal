@@ -136,6 +136,23 @@
   let D = {};                // the current project's records, by table name
   const SIGNED = new Map();  // storage_path -> { url, expires }
 
+  function walkthroughUrl(value) {
+    try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : ''; } catch (_) { return ''; }
+  }
+  function walkthroughsHtml() {
+    const rows = visible(D.walkthroughs), edit = canEdit('walkthroughs');
+    return `<div class="page-head"><div><div class="eyebrow">${esc(project().name)}</div><h1 class="page-title">Walkthrough</h1><p class="page-sub">Explore the design through an interactive tour or a walkthrough video.</p></div>
+      ${edit ? '<button class="btn btn-primary" data-action="new-row" data-page="walkthroughs">Add walkthrough</button>' : ''}</div>
+      ${rows.length ? rows.map(r => {
+        const url = walkthroughUrl(r.external_url), ready = r.status === 'Ready' && (url || (r.mode === '3D walkthrough' && r.model));
+        return `<article class="card walkthrough-card"><div class="walk-meta"><span>${esc(r.mode)}</span>${pill(r.status)}</div><h2>${esc(r.title)}</h2><p class="walk-description">${esc(r.description)}</p>
+          ${ready ? `<div class="walk-actions"><button class="btn btn-primary" data-action="start-walkthrough" data-id="${esc(r.id)}">${r.mode === 'Video' ? 'Play video' : 'Start walkthrough'}</button>${url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open in new tab</a>` : ''}</div>` : '<p class="helper-text">The walkthrough is not available yet. Your project team will add it here when ready.</p>'}
+          ${edit ? `<button class="btn btn-sm" data-action="open-row" data-page="walkthroughs" data-id="${esc(r.id)}">Edit walkthrough</button>` : ''}
+          <div id="walkthrough-player-${esc(r.id)}"></div></article>`;
+      }).join('') : emptyState('No walkthrough has been added for this project yet.')}
+      ${edit ? '<p class="helper-text">Use the hosted player link for interactive tours, or a direct MP4 link for videos. The hosting provider controls access to external content.</p>' : ''}`;
+  }
+
   function isStaff() { return !!ME && ME.status === "active" && ME.kind === "staff"; }
   function hasRole(list) {
     if (!isStaff()) return false;
@@ -223,6 +240,7 @@
 };
   function canEdit(resource = UI.page, operation = "UPDATE") {
     if (!isStaff() || UI.previewClient || isPortfolio() || isViewOnly()) return false;
+    if (resource === 'walkthroughs') resource = 'design_revisions';
     resource = ({overview:"progress_snapshots", finance:"finance_summary", project:"projects", access:"project_members"})[resource] || resource;
     if (resource === "projects") return hasRole(["managing_director", "project_manager", "system_admin"]);
     if (resource === "project_members") return hasRole(["managing_director", "project_manager", "sales", "system_admin"]);
@@ -302,6 +320,17 @@
         { key: "planned_end", label: "Planned finish", type: "date" },
         { key: "actual_start", label: "Actual start", type: "date" },
         { key: "actual_end", label: "Actual finish", type: "date" },
+      ].concat(VIS_ONLY),
+    },
+    walkthroughs: {
+      label: 'Walkthrough', icon: 'eye', group: 'work', table: 'walkthroughs',
+      title: 'title', order: 'created_at', desc: true,
+      fields: [
+        {key:'title',label:'Title',full:true},
+        {key:'description',label:'Description',type:'textarea',full:true},
+        {key:'mode',label:'Experience',type:'select',options:['Interactive tour','Video','3D walkthrough']},
+        {key:'status',label:'Status',type:'select',options:['Preparing','Ready']},
+        {key:'external_url',label:'Hosted tour / direct MP4 link (HTTPS)',type:'url',full:true},
       ].concat(VIS_ONLY),
     },
     design_revisions: {
@@ -522,7 +551,7 @@
     { key: "finance", label: "Payments" },
     { key: "admin", label: "Admin" },
   ];
-  const NAV_ORDER = ["milestones", "project_team", "design_revisions", "site_media", "materials", "boq_items",
+  const NAV_ORDER = ["walkthroughs", "milestones", "project_team", "design_revisions", "site_media", "materials", "boq_items",
                      "documents", "approvals", "site_issues", "variation_orders",
                      "quotations", "meetings", "payment_schedule", "invoices"];
 
@@ -560,7 +589,7 @@
     SETTINGS = data || {};
   }
 
-  const TABLES = ["milestones", "progress_snapshots", "design_revisions", "site_media",
+  const TABLES = ["walkthroughs", "milestones", "progress_snapshots", "design_revisions", "site_media",
                   "materials", "documents", "approvals", "site_issues", "variation_orders",
                   "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
                   "project_team", "boq_items", "finance_summary", "notifications"];
@@ -807,6 +836,12 @@
   /* ---------------------------------------------------------------- */
 
   async function saveRow(table, row, id) {
+    if (table === 'walkthroughs') {
+      if (!String(row.title || '').trim()) throw new Error('Enter a walkthrough title.');
+      if (row.external_url && !walkthroughUrl(row.external_url)) throw new Error('Use a valid HTTPS tour or video link.');
+      if (row.status === 'Ready' && row.mode !== '3D walkthrough' && !walkthroughUrl(row.external_url)) throw new Error('Add a hosted tour or video link before marking it Ready.');
+    }
+
     const clientAnswer = table === "approvals" && id && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient;
     if (!canEdit(table, id ? "UPDATE" : "INSERT") && !clientAnswer) throw new Error("You do not have permission to save this record.");
     if (clientAnswer) row = { response: row.response, comment: row.comment };
@@ -999,7 +1034,9 @@
 
   function setBanner(type, text) { UI.banner = { type, text }; render(); }
 
+  let walkthroughCleanup = null;
   function render() {
+    if (walkthroughCleanup) { walkthroughCleanup(); walkthroughCleanup = null; }
     const root = document.getElementById("app");
     if (UI.screen === "loading") { root.innerHTML = `<div class="boot-splash">Loading…</div>`; return; }
     if (UI.screen === "login")  { root.innerHTML = loginScreen(); return; }
@@ -1213,6 +1250,7 @@
     }
     const loadState = projectLoadStateHtml();
     if (loadState && !["info", "settings", "access"].includes(UI.page)) return loadState;
+    if (UI.page === "walkthroughs") return walkthroughsHtml();
     if (UI.page === "overview") return overviewHtml();
     if (UI.page === "notices") return noticesHtml();
     if (UI.page === "info") return infoHtml();
@@ -2224,6 +2262,28 @@
 
     try {
       switch (a) {
+        case 'start-walkthrough': {
+          const r = visible(D.walkthroughs).find(r => r.id === t.dataset.id);
+          const url = r && walkthroughUrl(r.external_url);
+          if (!r || r.status !== 'Ready' || (!url && !r.model)) return;
+          const host = document.getElementById('walkthrough-player-' + r.id);
+          if (!host) return;
+          if (walkthroughCleanup) { walkthroughCleanup(); walkthroughCleanup = null; }
+          if (r.mode === '3D walkthrough') {
+            host.textContent = 'Loading 3D walkthrough…';
+            try {
+              const {mountWalkthrough} = await import('./walkthrough-viewer.js');
+              if (!host.isConnected) return;
+              walkthroughCleanup = mountWalkthrough(host,r.model);
+            } catch(error) { host.textContent = 'The 3D viewer could not start. Please use a WebGL-enabled browser and try again.'; }
+            return;
+          }
+          host.innerHTML = r.mode === 'Video'
+            ? `<video class="walkthrough-player" src="${esc(url)}" controls playsinline preload="metadata">Your browser cannot play this video. Use Open in new tab.</video>`
+            : `<iframe class="walkthrough-player" src="${esc(url)}" title="${esc(r.title)}" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms" allow="fullscreen; autoplay" referrerpolicy="no-referrer" allowfullscreen></iframe>`;
+          return;
+        }
+
         case "retry-project": {
           const loading = loadProjectData(); render(); await loading; return render();
         }

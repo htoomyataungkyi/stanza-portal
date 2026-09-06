@@ -1,0 +1,12 @@
+{
+  "name": "stanza-walkthrough-build",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node build.cjs"
+  },
+  "dependencies": {
+    "esbuild": "0.25.10",
+    "three": "0.180.0"
+  }
+}
