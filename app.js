@@ -1615,6 +1615,10 @@
       const parts = [];
       if (/amount|qty|quantity|cost|progress|sequence/.test(c)) parts.push("num");
       if ((f && f.type === "textarea") || c === s.title) parts.push("wide");
+      // A phone number broken across two lines is not a phone number any
+      // more - you cannot read it back or dial it. It stays on one line and
+      // the table scrolls sideways, which it already does.
+      if (/^(phone|mobile|tel)$/.test(c)) parts.push("nowrap");
       return parts.length ? ` class="${parts.join(" ")}"` : "";
     };
     // On a phone the first column is all you see before swiping, so lead with
