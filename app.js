@@ -320,7 +320,10 @@
     milestones: {
       label: "Timeline", icon: "timeline", group: "work", table: "milestones",
       style: "table", title: "name", order: "sequence",
-      columns: ["sequence", "name", "status", "progress_pct", "planned_end"],
+      /* The order number is what sorts these rows, but showing it as a
+         column just repeats the order they are already in. It stays on the
+         form so the order can still be set. */
+      columns: ["name", "status", "progress_pct", "planned_end"],
       fields: [
         { key: "name", label: "Stage name", full: true },
         { key: "sequence", label: "Order", type: "number" },
@@ -394,7 +397,7 @@
     project_team: {
       label: "Project Team", icon: "team", group: "work", table: "project_team",
       style: "table", title: "name", order: "sequence",
-      columns: ["sequence", "name", "role", "phone", "email"],
+      columns: ["name", "role", "phone", "email"],
       fields: [
         { key: "name", label: "Name", full: true },
         { key: "role", label: "Role" },
@@ -1159,6 +1162,12 @@
     if (!isPortfolio()) NAV_GROUPS.forEach((g) => {
       const keys = groups[g.key];
       if (g.key === "admin") {
+        // Client View has to be what the client sees, whoever is looking.
+        // A managing director kept these two because view-only accounts are
+        // allowed to read them, and that test ran even in the preview - so
+        // the MD's Client View showed Project Access and Portal Settings,
+        // which no client has ever seen.
+        if (UI.previewClient) return;
         // A managing director reads these pages; they just cannot act on them.
         if (!canEdit("project_members") && !isViewOnly()) return;
         nav += `<div class="nav-group-label">${esc(g.label)}</div>`;
@@ -2353,6 +2362,8 @@
 
   const WRITE_ACTIONS = new Set(["new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member",
                                  "compose-notice", "send-notice"]);
+  // Still barred in Client View, because nothing there should act for real.
+  const OWN_ACCOUNT_ACTIONS = new Set(["open-account", "save-password"]);
 
   document.addEventListener("click", async (e) => {
     const anchor = e.target.closest("a[href]");
@@ -2374,7 +2385,10 @@
     if (UI.previewClient && WRITE_ACTIONS.has(a)) {
       return setBanner("readonly", "Client View is read-only. Switch to Admin to make changes.");
     }
-    if (isViewOnly() && WRITE_ACTIONS.has(a)) {
+    // Your own password is yours. View-only describes what someone may do
+    // to the projects, not whether they may secure their own sign-in - and
+    // the managing director could not change theirs at all before this.
+    if (isViewOnly() && WRITE_ACTIONS.has(a) && !OWN_ACCOUNT_ACTIONS.has(a)) {
       return setBanner("readonly", "Your account has view-only access. Ask the Product Owner to make this change.");
     }
     if ((a === "close-modal" || a === "close-pdf-bg") && e.target !== t) return;
