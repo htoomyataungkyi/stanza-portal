@@ -354,6 +354,27 @@ h1, h2, h3 { text-wrap: balance; font-family: var(--font-display); margin: 0; }
 
 /* ---------- KPI cards with icon chip ---------- */
 .kpi-card { display: flex; align-items: flex-start; gap: 12px; }
+/* The four tiles are buttons. A button brings its own font, alignment and
+   background, so hand back what .card had set before adding the pointer. */
+button.kpi-card {
+  font: inherit; color: inherit; text-align: left; width: 100%;
+  cursor: pointer; appearance: none;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+button.kpi-card:hover { border-color: var(--accent-soft-border); box-shadow: var(--shadow-md); }
+button.kpi-card:active { transform: translateY(1px); }
+button.kpi-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kpi-card-body { flex: 1; min-width: 0; }
+/* A phone never hovers, so the tile has to look tappable standing still. */
+.kpi-go {
+  align-self: center; flex-shrink: 0; margin-left: 4px;
+  font-size: 20px; line-height: 1; color: var(--text-faint);
+}
+button.kpi-card:hover .kpi-go { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  button.kpi-card { transition: none; }
+  button.kpi-card:active { transform: none; }
+}
 .kpi-chip {
   width: 38px; height: 38px; border-radius: var(--radius-sm); display: flex; align-items: center;
   justify-content: center; flex-shrink: 0;
