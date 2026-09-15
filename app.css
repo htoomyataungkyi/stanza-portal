@@ -669,6 +669,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   thead th { white-space: nowrap; }
   tbody td { padding: 10px 12px; }
   th.wide, td.wide { min-width: 230px; }
+  /* A number the reader has to dial, kept whole on one line. */
+  th.nowrap, td.nowrap { white-space: nowrap; }
   .clamp3 {
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden; overflow-wrap: anywhere;
