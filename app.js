@@ -1443,31 +1443,44 @@
         </div>
       </div>
 
+      ${/* Each tile summarises a page, so each one opens it. They are real
+            buttons rather than divs with a click on them, so the keyboard
+            and a screen reader treat them as the links they are, and the
+            chevron says they can be tapped without waiting for a hover
+            that a phone never gives. */""}
       <div class="grid kpi-grid">
-        <div class="card kpi-card">
+        <button type="button" class="card kpi-card" data-action="goto" data-page="milestones"
+                aria-label="Schedule — open the timeline">
           <div class="kpi-chip kpi-chip-peach">${icon("timeline", 17)}</div>
-          <div><div class="kpi-card-label">Schedule</div>
+          <div class="kpi-card-body"><div class="kpi-card-label">Schedule</div>
             <div class="kpi-card-value">${esc(snap.schedule_status || "—")}</div>
             <div class="kpi-card-note">${daysLeft !== null ? (daysLeft >= 0 ? daysLeft + " days remaining" : Math.abs(daysLeft) + " days overdue") : "—"}</div></div>
-        </div>
-        <div class="card kpi-card">
+          <span class="kpi-go" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="card kpi-card" data-action="goto" data-page="milestones"
+                aria-label="Phases completed — open the timeline">
           <div class="kpi-chip kpi-chip-mint">${icon("check", 17)}</div>
-          <div><div class="kpi-card-label">Phases completed</div>
+          <div class="kpi-card-body"><div class="kpi-card-label">Phases completed</div>
             <div class="kpi-card-value">${done} of ${phases.length}</div>
             <div class="kpi-card-note">${esc(p.next_milestone || "")}</div></div>
-        </div>
-        <div class="card kpi-card">
+          <span class="kpi-go" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="card kpi-card" data-action="goto" data-page="approvals"
+                aria-label="${admin ? "Client action" : "Your action"} — open approvals">
           <div class="kpi-chip kpi-chip-blush">${icon("warn", 17)}</div>
-          <div><div class="kpi-card-label">${admin ? "Client action" : "Your action"}</div>
+          <div class="kpi-card-body"><div class="kpi-card-label">${admin ? "Client action" : "Your action"}</div>
             <div class="kpi-card-value">${pending.length} approval${pending.length === 1 ? "" : "s"}</div>
             <div class="kpi-card-note">${nextDeadline && nextDeadline.deadline ? "Next due " + fmtDate(nextDeadline.deadline) : "Nothing pending"}</div></div>
-        </div>
-        <div class="card kpi-card">
+          <span class="kpi-go" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="card kpi-card" data-action="goto" data-page="payment_schedule"
+                aria-label="Payment — open the payment schedule">
           <div class="kpi-chip kpi-chip-neutral">${icon("finance", 17)}</div>
-          <div><div class="kpi-card-label">Payment</div>
+          <div class="kpi-card-body"><div class="kpi-card-label">Payment</div>
             <div class="kpi-card-value">${nextPay ? "Next: " + fmtDate(nextPay.due_date) : "Up to date"}</div>
             <div class="kpi-card-note">${nextPay ? esc(nextPay.milestone) : "No payments due"}</div></div>
-        </div>
+          <span class="kpi-go" aria-hidden="true">›</span>
+        </button>
       </div>
 
       ${/* The timeline sat in a narrow column beside a much taller card,
