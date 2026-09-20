@@ -603,7 +603,7 @@
   }
 
   const TABLES = ["walkthroughs", "milestones", "progress_snapshots", "design_revisions", "site_media",
-                  "materials", "documents", "approvals", "site_issues", "variation_orders",
+                  "materials", "documents", "approvals", "approval_history", "site_issues", "variation_orders",
                   "quotations", "meetings", "payment_schedule", "invoices", "payments", "files",
                   "project_team", "boq_items", "finance_summary", "notifications"];
 
@@ -893,12 +893,16 @@
 
     const clientAnswer = table === "approvals" && id && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient;
     if (!canEdit(table, id ? "UPDATE" : "INSERT") && !clientAnswer) throw new Error("You do not have permission to save this record.");
-    if (clientAnswer) row = { response: row.response, comment: row.comment };
+    if (clientAnswer) {
+      if (approvalLocked((D.approvals || []).find(r => r.id === id))) throw new Error('Editing is locked. Ask your administrator to reopen it.');
+      row = { response: row.response, comment: row.comment };
+    }
     // Inserts keep database defaults; updates must transmit intentional clears.
     const fields = (SCHEMA[table] || {}).fields || [];
     const payload = {};
     Object.keys(row).forEach((k) => {
       if (k.startsWith("__") || row[k] === undefined) return;
+      if (table === "approvals" && ["approved_once_at","client_edit_until","reopen_count"].includes(k)) return;
       const value = row[k];
       if (!id && (value === "" || value === null)) return;
       const field = fields.find((f) => f.key === k);
@@ -2117,12 +2121,31 @@
 
   /* ---- fields ------------------------------------------------------ */
 
+  function approvalLocked(row) {
+    return !!row && !!row.approved_once_at && (!row.client_edit_until || Date.now() >= Date.parse(row.client_edit_until));
+  }
+  function clientApprovalEditable() {
+    if (!ME || ME.kind !== 'client' || ME.status !== 'active' || UI.previewClient) return false;
+    const m = UI.modal;
+    return !m || m.page !== 'approvals' || !approvalLocked((D.approvals || []).find(r => r.id === m.id) || m.draft);
+  }
+  function approvalHistoryHtml(m) {
+    const row = (D.approvals || []).find(r => r.id === m.id) || m.draft;
+    const locked = approvalLocked(row);
+    const entries = (D.approval_history || []).filter(h => h.approval_id === m.id).sort((a,b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
+    const timestamp = value => value ? new Date(value).toLocaleString() : '—';
+    return `<section class="approval-window"><p>${locked ? 'Editing is locked. An administrator must reopen it.' : row.approved_once_at ? 'Client editing closes: ' + esc(timestamp(row.client_edit_until)) : 'After approval, client edits are allowed for one hour.'}</p>
+      ${canEdit('approvals') && row.approved_once_at && locked ? `<button class="btn" data-action="reopen-approval" data-id="${esc(m.id)}" ${UI.busy ? 'disabled' : ''}>Reopen for 1 hour</button>` : ''}</section>
+      <details class="approval-history"><summary>Approval history (${entries.length})</summary><p class="helper-text">History begins when this feature was enabled. Times use your device timezone.</p>
+      ${entries.map(h => `<article><strong>${esc(h.event === 'reopened' ? 'Editing reopened for 1 hour' : h.event === 'history_started' ? 'Existing decision recorded' : h.event)}</strong><p>${esc(h.actor_name)} · ${esc(timestamp(h.occurred_at))}</p><p>${esc(h.before_response || '—')} → ${esc(h.after_response || '—')}</p>${h.before_comment !== h.after_comment ? `<p>Previous comment: ${esc(h.before_comment || '—')}</p><p>New comment: ${esc(h.after_comment || '—')}</p>` : ''}</article>`).join('') || '<p>No history yet.</p>'}</details>`;
+  }
+
   function renderFields(fields, values, readOnly) {
     const visible = fields.filter((f) => {
       if (f.staffOnly && !isStaff()) return false;
       return true;
     });
-    return `<div class="form-grid">${visible.map((f) => fieldHtml(f, values[f.key], readOnly && !(f.clientEditable && ME && ME.kind === "client" && ME.status === "active" && !UI.previewClient))).join("")}</div>`;
+    return `<div class="form-grid">${visible.map((f) => fieldHtml(f, values[f.key], readOnly && !(f.clientEditable && clientApprovalEditable()))).join("")}</div>`;
   }
 
   function fieldHtml(f, value, readOnly) {
@@ -2239,14 +2262,14 @@
     const readOnly = !canEdit(m.page, m.isNew ? "INSERT" : "UPDATE");
     const title = m.isNew ? "Add " + s.label.replace(/s$/, "") : (m.draft[s.title] || s.label);
     return wrapModal(String(title).slice(0, 70),
-      `<div class="modal-body" id="row-form">${renderFields(s.fields, m.draft, readOnly)}</div>`,
+      `<div class="modal-body" id="row-form">${renderFields(s.fields, m.draft, readOnly)}${m.page === "approvals" && !m.isNew ? approvalHistoryHtml(m) : ""}</div>`,
       `${canEdit(m.page, "DELETE") && !m.isNew ? `<button class="btn btn-ghost btn-danger" data-action="delete-row">${icon("trash",14)} Delete</button>` : "<span></span>"}
        <div style="display:flex;gap:8px;">
          <button class="btn" data-action="close-modal">${readOnly && !hasClientEditable(s) ? "Close" : "Cancel"}</button>
          ${(!readOnly || hasClientEditable(s)) ? `<button class="btn btn-primary" data-action="save-row" ${UI.busy ? "disabled" : ""}>${UI.busy ? "Saving…" : "Save"}</button>` : ""}
        </div>`);
   }
-  function hasClientEditable(s) { return !!ME && ME.status === "active" && ME.kind === "client" && !UI.previewClient && s.fields.some((f) => f.clientEditable); }
+  function hasClientEditable(s) { return clientApprovalEditable() && s.fields.some((f) => f.clientEditable); }
 
   function wrapModal(title, body, foot) {
     return `<div class="modal-overlay" data-action="close-modal"><div class="modal">
@@ -2377,7 +2400,7 @@
     if (pf && project()) Object.assign(project(), readFields(pf, PROJECT_FIELDS));
   }
 
-  const WRITE_ACTIONS = new Set(["new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member",
+  const WRITE_ACTIONS = new Set(["reopen-approval","new-row", "save-row", "delete-row", "detach-file", "record-progress", "save-progress", "save-settings", "save-project", "new-project", "save-new-project", "save-finance", "open-account", "save-password", "add-member", "save-member", "revoke-member",
                                  "compose-notice", "send-notice"]);
   // Still barred in Client View, because nothing there should act for real.
   const OWN_ACCOUNT_ACTIONS = new Set(["open-account", "save-password"]);
@@ -2420,6 +2443,21 @@
 
     try {
       switch (a) {
+        case 'reopen-approval': {
+          if (!canEdit('approvals') || UI.busy) return;
+          const row = (D.approvals || []).find(r => r.id === t.dataset.id);
+          if (!row || !approvalLocked(row)) return;
+          UI.busy = true; render();
+          try {
+            const {data,error} = await SB.from('approvals').update({reopen_count:(row.reopen_count || 0)+1}).eq('id',row.id).eq('reopen_count',row.reopen_count || 0).select('id').single();
+            if(error) throw error;
+            if(!data) throw new Error('The approval changed. Reload and try again.');
+            await loadProjectData(); UI.modal = null;
+            setBanner('saved','Client editing reopened for one hour. The action is recorded in history.');
+          } finally { UI.busy = false; render(); }
+          return;
+        }
+
         case 'toggle-glass-motion': {
           const hero = t.closest('.dashboard-hero');
           if (!hero) return;

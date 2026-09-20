@@ -1078,3 +1078,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* A drawing file is not a document: nothing opens it in a browser, and it
    is usually the largest thing in the project. */
 .cad-chip { background: var(--info-soft); color: var(--info); }
+
+.approval-window { margin-top:20px; padding:14px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); font-size:13px; line-height:1.6; }
+.approval-window .btn { margin-top:10px; }
+.approval-history { margin-top:20px; font-size:13px; line-height:1.6; }
+.approval-history summary { cursor:pointer; min-height:44px; font-weight:600; }
+.approval-history article { border-top:1px solid var(--border); padding:12px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.approval-history article p { margin:5px 0; color:var(--text-muted); }
