@@ -320,13 +320,10 @@
     milestones: {
       label: "Timeline", icon: "timeline", group: "work", table: "milestones",
       style: "table", title: "name", order: "sequence",
-      /* The order number is what sorts these rows, but showing it as a
-         column just repeats the order they are already in. It stays on the
-         form so the order can still be set. */
+      // Preserve the stored sort order without exposing an Order field.
       columns: ["name", "status", "progress_pct", "planned_end"],
       fields: [
         { key: "name", label: "Stage name", full: true },
-        { key: "sequence", label: "Order", type: "number" },
         { key: "status", label: "Status", type: "select", options: SELECT.milestoneStatus },
         { key: "progress_pct", label: "Progress (%)", type: "number" },
         { key: "planned_start", label: "Planned start", type: "date" },
@@ -401,7 +398,6 @@
       fields: [
         { key: "name", label: "Name", full: true },
         { key: "role", label: "Role" },
-        { key: "sequence", label: "Order", type: "number" },
         { key: "phone", label: "Phone" },
         { key: "email", label: "Email", full: true },
       ].concat(VIS_ONLY),
@@ -2514,6 +2510,9 @@
         case "new-row": {
           const page = t.dataset.page, s = SCHEMA[page];
           const draft = {};
+          if (s.order === "sequence") {
+            draft.sequence = Math.max(0, ...(D[s.table] || []).map(r => Number(r.sequence) || 0)) + 1;
+          }
           s.fields.forEach((f) => { draft[f.key] = f.type === "select" ? f.options[0] : ""; });
           if (s.fields.some((f) => f.key === "visibility")) draft.visibility = "client";
           UI.modal = { page, id: null, isNew: true, draft };
