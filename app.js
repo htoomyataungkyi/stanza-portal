@@ -881,6 +881,20 @@
   /* ---------------------------------------------------------------- */
 
   async function saveRow(table, row, id) {
+    if (table === 'milestones') {
+      const progress = row.progress_pct;
+      if (progress === null || progress === '' || !Number.isInteger(Number(progress)) || Number(progress) < 0 || Number(progress) > 100) {
+        throw new Error('Progress must be a whole number from 0 to 100.');
+      }
+      if (!SELECT.milestoneStatus.includes(row.status)) throw new Error('Please select a valid stage status.');
+      // Send only editable fields. Preserve the stored order and server metadata.
+      const clean = {};
+      SCHEMA.milestones.fields.forEach(f => { if (row[f.key] !== undefined) clean[f.key] = row[f.key]; });
+      clean.progress_pct = Number(progress);
+      if (!id) clean.sequence = row.sequence;
+      row = clean;
+    }
+
     if (table === 'walkthroughs') {
       if (!String(row.title || '').trim()) throw new Error('Enter a walkthrough title.');
       if (row.external_url && !walkthroughUrl(row.external_url)) throw new Error('Use a valid HTTPS tour or video link.');
@@ -2154,7 +2168,7 @@
       c = `<select data-field="${esc(f.key)}" ${dis}>${f.options.map((o) =>
         `<option value="${esc(o)}" ${o === value ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
     } else if (f.type === "number") {
-      c = `<input type="number" data-field="${esc(f.key)}" value="${value === null || value === undefined ? "" : esc(value)}" ${dis}/>`;
+      c = `<input type="number" data-field="${esc(f.key)}" value="${value === null || value === undefined ? "" : esc(value)}" ${f.key === "progress_pct" ? 'min="0" max="100" step="1"' : ""} ${dis}/>`;
     } else if (f.type === "date") {
       c = `<input type="date" data-field="${esc(f.key)}" value="${esc(String(value || "").slice(0,10))}" ${dis}/>`;
     } else if (f.type === "time") {
@@ -2271,7 +2285,7 @@
     return `<div class="modal-overlay" data-action="close-modal"><div class="modal">
       <div class="modal-head"><div class="modal-title">${esc(title)}</div>
         <button class="icon-btn" data-action="close-modal" aria-label="Close">${icon("close")}</button></div>
-      ${body}<div class="modal-foot">${foot}</div></div></div>`;
+      ${UI.modal && UI.modal.saveError ? `<div class="banner error" role="alert" style="margin:12px 20px;">${esc(UI.modal.saveError)}</div>` : ""}${body}<div class="modal-foot">${foot}</div></div></div>`;
   }
 
   const NEW_PROJECT_FIELDS = [
@@ -2695,7 +2709,10 @@
   });
 
   async function saveModal() {
+    if (UI.busy || !UI.modal) return;
+    syncForm();
     const m = UI.modal, s = SCHEMA[m.page];
+    m.saveError = null;
     UI.busy = true; render();
     try {
       await saveRow(s.table, m.draft, m.id);
@@ -2704,7 +2721,8 @@
       setBanner("saved", "Saved.");
     } catch (err) {
       UI.busy = false;
-      setBanner("error", err.message || "Couldn't save that.");
+      m.saveError = err.message || "Couldn't save that. Please try again.";
+      render();
     }
   }
 
