@@ -1085,3 +1085,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .approval-history summary { cursor:pointer; min-height:44px; font-weight:600; }
 .approval-history article { border-top:1px solid var(--border); padding:12px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
 .approval-history article p { margin:5px 0; color:var(--text-muted); }
+
+/* Strong, tall headings; body text and the logo keep their own typography. */
+:root { --font-heading:"Barlow Condensed","Arial Narrow","Noto Sans Myanmar","Inter",sans-serif; }
+h1,h2,h3,h4,h5,h6,.page-title,.hero-title,.modal-title,.section-title,.topbar-title,.topbar-greet-name,.report-heading h2,.approval-overview h2 {
+ font-family:var(--font-heading); font-weight:800; font-style:normal; letter-spacing:.015em; line-height:1.3;
+}
+.page-title { font-size:32px; }
+.modal-title { font-size:24px; }
+.section-title { font-size:22px; }
+.topbar-title { font-size:20px; }
+.topbar-greet-name { font-size:24px; }
+.dashboard-hero .hero-title { font-family:var(--font-heading); font-weight:800; line-height:1.15; letter-spacing:.01em; }
+.report-heading h2,.approval-overview h2 { font-weight:800; }
+@media(max-width:600px) { .page-title { font-size:28px; } .modal-title { font-size:22px; } }
