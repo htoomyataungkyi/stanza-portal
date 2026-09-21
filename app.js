@@ -812,7 +812,7 @@
         return s.desc ? -c : c;
       });
     });
-    (D.progress_snapshots || []).sort((a, b) => String(b.recorded_on).localeCompare(String(a.recorded_on)));
+    (D.progress_snapshots || []).sort((a, b) => String(b.recorded_on).localeCompare(String(a.recorded_on)) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
   }
 
   function fileById(id) { return (D.files || []).find((f) => f.id === id) || null; }
@@ -1447,6 +1447,7 @@
             <div><span>Current phase</span><strong>${esc(currentPhase ? currentPhase.name : phases.length ? 'All phases completed' : 'Not scheduled')}</strong><small>${esc(currentPhase ? currentPhase.status : '')}</small></div>
             <div><span>${daysLeft !== null && daysLeft < 0 ? 'Days overdue' : 'Days left'}</span><strong class="hero-days">${daysLeft === null || !Number.isFinite(daysLeft) ? '—' : Math.abs(daysLeft)}</strong><small>${daysLeft === 0 ? 'Handover due today' : 'Until target handover'}</small></div>
           </div>
+          ${canEdit('progress_snapshots','INSERT') ? '<button class="btn btn-primary" style="margin-top:18px;" data-action="record-progress">Edit overall progress</button>' : ''}
         </div>
         <div class="hero-donut-wrap">
           ${donut(pct, 232, 20)}
@@ -1848,7 +1849,7 @@
     const mine = (rows || []).filter((r) => r.project_id === pid);
     if (!mine.length) return null;
     return mine.slice().sort((a, b) =>
-      String(b[dateKey] || b.created_at || "").localeCompare(String(a[dateKey] || a.created_at || "")))[0];
+      String(b[dateKey] || b.created_at || "").localeCompare(String(a[dateKey] || a.created_at || "")) || String(b.created_at || "").localeCompare(String(a.created_at || "")))[0];
   }
 
   function portfolioRow(p) {
@@ -2168,7 +2169,7 @@
       c = `<select data-field="${esc(f.key)}" ${dis}>${f.options.map((o) =>
         `<option value="${esc(o)}" ${o === value ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
     } else if (f.type === "number") {
-      c = `<input type="number" data-field="${esc(f.key)}" value="${value === null || value === undefined ? "" : esc(value)}" ${f.key === "progress_pct" ? 'min="0" max="100" step="1"' : ""} ${dis}/>`;
+      c = `<input type="number" data-field="${esc(f.key)}" value="${value === null || value === undefined ? "" : esc(value)}" ${["progress_pct","overall_pct","planned_pct"].includes(f.key) ? 'min="0" max="100" step="1"' : ""} ${dis}/>`;
     } else if (f.type === "date") {
       c = `<input type="date" data-field="${esc(f.key)}" value="${esc(String(value || "").slice(0,10))}" ${dis}/>`;
     } else if (f.type === "time") {
@@ -2562,21 +2563,39 @@
           return render();
         }
 
-        case "record-progress":
+        case "record-progress": {
+          if (!canEdit('progress_snapshots','INSERT')) return;
+          const latest = (D.progress_snapshots || [])[0] || {};
           UI.modal = { kind: "progress", draft: {
-            overall_pct: (D.progress_snapshots[0] || {}).overall_pct || 0,
-            planned_pct: (D.progress_snapshots[0] || {}).planned_pct || 0,
-            schedule_status: "On Track", budget_status: "On Track",
-            recorded_on: new Date().toISOString().slice(0, 10), note: "" } };
+            overall_pct: latest.overall_pct ?? 0, planned_pct: latest.planned_pct ?? 0,
+            schedule_status: latest.schedule_status || "On Track", budget_status: latest.budget_status || "On Track",
+            recorded_on: new Date().toLocaleDateString('en-CA'), note: "" } };
+          // Use local calendar date without depending on locale formatting.
+          const now = new Date();
+          UI.modal.draft.recorded_on = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
           return render();
+        }
         case "save-progress": {
-          UI.busy = true; render();
-          const p = Object.assign({}, UI.modal.draft, { project_id: UI.projectId, recorded_by: ME.id });
-          const { error } = await SB.from("progress_snapshots").insert(p);
-          UI.busy = false; UI.modal = null;
-          if (error) return setBanner("error", error.message);
-          await loadProjectData();
-          return setBanner("saved", "Progress recorded.");
+          if (UI.busy || !canEdit('progress_snapshots','INSERT') || !UI.modal) return;
+          const modal = UI.modal;
+          modal.saveError = null;
+          try {
+            for (const key of ['overall_pct','planned_pct']) {
+              const value = modal.draft[key];
+              if (value === null || value === '' || !Number.isInteger(Number(value)) || Number(value)<0 || Number(value)>100) throw new Error('Enter percentages as whole numbers from 0 to 100.');
+            }
+            if (!modal.draft.recorded_on) throw new Error('Please enter the progress date.');
+            UI.busy = true; render();
+            const payload = Object.assign({}, modal.draft, {project_id:UI.projectId,recorded_by:ME.id});
+            const {error} = await SB.from('progress_snapshots').insert(payload);
+            if (error) throw error;
+            await loadProjectData();
+            UI.busy = false; UI.modal = null;
+            return setBanner('saved','Overall progress saved.');
+          } catch (error) {
+            UI.busy = false; modal.saveError = error.message || 'Could not save progress. Please try again.';
+            return render();
+          }
         }
 
         case "save-settings": {
